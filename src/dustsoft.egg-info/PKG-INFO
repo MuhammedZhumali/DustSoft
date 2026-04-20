@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: dustsoft
+Version: 0.1.0
+Summary: Hardware-oriented application skeleton with clean architecture ports and mocks.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+
+# DustSoft
+
+Project skeleton for a hardware-integrated application.
