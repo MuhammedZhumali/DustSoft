@@ -11,6 +11,8 @@ from typing import Protocol
 class ActuatorPort(Protocol):
     """Command interface for an actuator device."""
 
+    is_connected: bool
+
     def start(self) -> None:
         """Start actuator operation."""
 
@@ -24,12 +26,16 @@ class ActuatorPort(Protocol):
 class PressureSensorPort(Protocol):
     """Read-only interface for pressure sensing hardware."""
 
+    is_connected: bool
+
     def read_pressure(self) -> float:
         """Return current pressure value in bar."""
 
 
 class ReferenceMeterPort(Protocol):
     """Reference meter used for calibration and validation routines."""
+
+    is_connected: bool
 
     def read_reference_value(self) -> float:
         """Return current reference measurement."""

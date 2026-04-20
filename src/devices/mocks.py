@@ -11,6 +11,7 @@ from .ports import ActuatorPort, PressureSensorPort, ReferenceMeterPort
 class MockActuator(ActuatorPort):
     is_running: bool = False
     power: float = 0.0
+    is_connected: bool = True
 
     def start(self) -> None:
         self.is_running = True
@@ -26,6 +27,7 @@ class MockActuator(ActuatorPort):
 @dataclass
 class MockPressureSensor(PressureSensorPort):
     pressure_sequence: list[float] = field(default_factory=lambda: [1.0, 1.1, 1.2])
+    is_connected: bool = True
     _index: int = 0
 
     def read_pressure(self) -> float:
@@ -39,6 +41,7 @@ class MockPressureSensor(PressureSensorPort):
 @dataclass
 class MockReferenceMeter(ReferenceMeterPort):
     value: float = 1.0
+    is_connected: bool = True
 
     def read_reference_value(self) -> float:
         return self.value

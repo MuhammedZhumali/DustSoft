@@ -14,7 +14,8 @@ def build_app() -> Application:
     Uses mock adapters by default so the app can run without real hardware.
     """
     return Application(
-        actuator=MockActuator(),
+        compressor=MockActuator(),
+        valve=MockActuator(),
         pressure_sensor=MockPressureSensor(),
         reference_meter=MockReferenceMeter(),
     )
