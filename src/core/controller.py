@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from core.errors import DeviceProtocolError, DeviceTimeout, SafetyViolation
 from core.state_machine import AppState, Operation, StateMachine
 from devices.ports import ActuatorPort, PressureSensorPort
 from safety.interlock import Interlock
@@ -33,10 +34,13 @@ class Controller:
 
     def start(self) -> AppState:
         """Start normal operation."""
-        next_state = self.state_machine.apply(Operation.START)
-        self.compressor.start()
-        self.logger.info("Controller started")
-        return next_state
+        try:
+            next_state = self.state_machine.apply(Operation.START)
+            self.compressor.start()
+            self.logger.info("Controller started")
+            return next_state
+        except (DeviceTimeout, DeviceProtocolError, SafetyViolation) as exc:
+            return self._handle_runtime_error(exc, source="start")
 
     def stop(self) -> AppState:
         """Stop normal operation and leave devices in a safe idle state."""
@@ -47,21 +51,31 @@ class Controller:
 
     def manual_injection(self) -> AppState:
         """Perform a manual dust injection after all interlocks pass."""
-        self.state_machine.assert_operation_allowed(Operation.MANUAL_INJECTION)
-        interlock = self._interlock()
-        interlock.ensure_devices_connected(self._devices())
-        pressure = self.pressure_sensor.read_pressure()
-        self.last_pressure = pressure
-        interlock.ensure_injection_allowed(
-            state=self.state,
-            pressure=pressure,
-            devices=self._devices(),
-        )
+        try:
+            self.state_machine.assert_operation_allowed(Operation.MANUAL_INJECTION)
+            interlock = self._interlock()
+            interlock.ensure_devices_connected(self._devices())
+            pressure = self.pressure_sensor.read_pressure()
+            self.last_pressure = pressure
+            interlock.ensure_injection_allowed(
+                state=self.state,
+                pressure=pressure,
+                devices=self._devices(),
+            )
 
-        next_state = self.state_machine.apply(Operation.MANUAL_INJECTION)
-        self.compressor.start()
-        self.valve.start()
-        self.logger.info("Manual injection started at pressure %.3f", pressure)
+            next_state = self.state_machine.apply(Operation.MANUAL_INJECTION)
+            self.compressor.start()
+            self.valve.start()
+            self.logger.info("Manual injection started at pressure %.3f", pressure)
+            return next_state
+        except (DeviceTimeout, DeviceProtocolError, SafetyViolation) as exc:
+            return self._handle_runtime_error(exc, source="manual_injection")
+
+    def complete_injection(self) -> AppState:
+        """Return from INJECTION to RUNNING after a pulse completes."""
+        next_state = self.state_machine.apply(Operation.COMPLETE_INJECTION)
+        self.valve.stop()
+        self.logger.info("Injection pulse completed")
         return next_state
 
     def emergency_stop(self, source: str) -> AppState:
@@ -101,3 +115,18 @@ class Controller:
                 stop()
             except Exception:
                 self.logger.exception("Failed to stop %s during safe shutdown", name)
+
+    def _handle_runtime_error(
+        self,
+        exc: DeviceTimeout | DeviceProtocolError | SafetyViolation,
+        *,
+        source: str,
+    ) -> AppState:
+        if isinstance(exc, SafetyViolation):
+            self.logger.critical("Safety violation during %s: %s", source, exc)
+            return self.emergency_stop(f"{source}:{type(exc).__name__}")
+
+        self._safe_stop_devices()
+        next_state = self.state_machine.enter_fault()
+        self.logger.error("Device failure during %s: %s", source, exc)
+        return next_state

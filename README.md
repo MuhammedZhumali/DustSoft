@@ -43,12 +43,15 @@ Run local checks without real hardware:
 - Runtime data is stored in `data/`.
 - Persistent settings are stored in `data/settings.json`.
 - Optional hardware mapping can be provided in `data/hardware.json`.
+- Stand configuration is stored in `data/config.json` and validated on startup.
 - Journals are stored in `data/events.log.jsonl`, `data/alarms.log.jsonl`, and `data/technical.log.jsonl`.
 - Daily log history is stored in `data/history/<journal-name>/YYYY-MM-DD.jsonl`.
 - Exported log bundles are stored in `data/exports/`.
 - After restart, the application restores saved injection settings, pressure limits, and user parameters during bootstrap.
 
 To prepare a Raspberry Pi mapping, copy [config/hardware.example.json](/c:/Users/Muhalek/DustSoft/DustSoft/config/hardware.example.json:1) to `data/hardware.json` and edit the GPIO assignments.
+
+The application also exposes an internal service API for UI and future remote transports. This API is not necessarily a network API; it is a shared command/query layer used by GUI, orchestration, and integration code.
 
 ## Raspberry Pi Autostart
 

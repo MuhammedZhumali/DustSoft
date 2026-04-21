@@ -7,6 +7,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+from core.config_model import JsonStandConfigStorage, StandConfig
+from core.cycle import TechnologyCycleService
+from core.errors import DeviceProtocolError, DeviceTimeout, SafetyViolation
+from core.service_api import ApplicationApi
 from core.controller import Controller
 from core.state_machine import AppState
 from logging_system import JournalEntry, JsonLineJournal, JournalService
@@ -37,6 +41,7 @@ class Application:
     pressure_max: float = 1.5
     data_dir: Path = Path("data")
     settings_storage: JsonSettingsStorage | None = None
+    config_storage: JsonStandConfigStorage | None = None
     journal: JournalService | None = None
     remote_access_policy: RemoteAccessPolicy = field(default_factory=RemoteAccessPolicy)
 
@@ -46,6 +51,10 @@ class Application:
         self.settings_storage = self.settings_storage or JsonSettingsStorage(
             self.data_dir / "settings.json"
         )
+        self.config_storage = self.config_storage or JsonStandConfigStorage(
+            self.data_dir / "config.json"
+        )
+        self.stand_config = self.config_storage.load()
         self.journal = self.journal or JournalService(
             event_journal=JsonLineJournal(self.data_dir / "events.log.jsonl"),
             alarm_journal=JsonLineJournal(self.data_dir / "alarms.log.jsonl"),
@@ -63,12 +72,14 @@ class Application:
             compressor=self.compressor,
             valve=self.valve,
             pressure_sensor=self.pressure_sensor,
-            pressure_min=self.settings.pressure.minimum_bar,
-            pressure_max=self.settings.pressure.maximum_bar,
+            pressure_min=self.settings.pressure.minimum_bar or self.stand_config.pressure.minimum_bar,
+            pressure_max=self.settings.pressure.maximum_bar or self.stand_config.pressure.maximum_bar,
         )
         self.injection_settings = self.settings.injection
         self.user_parameters = dict(self.settings.user_parameters)
         self.remote_service = RemoteService(self, access_policy=self.remote_access_policy)
+        self.cycle_service = TechnologyCycleService(self)
+        self.api = ApplicationApi(self, cycle_service=self.cycle_service)
 
     @property
     def state(self) -> AppState:
@@ -77,7 +88,17 @@ class Application:
 
     def bootstrap(self) -> None:
         """Prepare dependencies before normal operation."""
-        self.controller.state_machine.transition_to(AppState.READY)
+        try:
+            self.stand_config.validate()
+            self.controller.state_machine.transition_to(AppState.READY)
+        except ValueError as exc:
+            self.controller.state_machine.enter_fault()
+            self.journal.log_alarm(
+                event_type="config_validation_failed",
+                description=f"Invalid stand configuration: {exc}",
+                system_snapshot=self.snapshot_state(),
+            )
+            raise
         self.journal.log_technical(
             event_type="application_bootstrap",
             description="Application bootstrapped and restored persisted settings",
@@ -120,6 +141,15 @@ class Application:
         self.journal.log_event(
             event_type="manual_injection",
             description="Manual injection executed",
+            system_snapshot=self.snapshot_state(),
+        )
+        return next_state
+
+    def complete_injection(self) -> AppState:
+        next_state = self.controller.complete_injection()
+        self.journal.log_event(
+            event_type="manual_injection_completed",
+            description="Manual injection pulse completed",
             system_snapshot=self.snapshot_state(),
         )
         return next_state
@@ -248,6 +278,8 @@ class Application:
             "software_version": self.software_version,
             "data_directory": str(self.data_dir.resolve()),
             "settings_file": str(self.settings_storage.path.resolve()),
+            "config_file": str(self.config_storage.path.resolve()),
+            "config_schema_version": self.stand_config.schema_version,
             "log_export_directory": str((self.data_dir / "exports").resolve()),
             "remote_access": {
                 "tls_required": self.remote_access_policy.require_tls,

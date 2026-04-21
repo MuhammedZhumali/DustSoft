@@ -25,6 +25,7 @@ class Operation(str, Enum):
     START = "START"
     STOP = "STOP"
     MANUAL_INJECTION = "MANUAL_INJECTION"
+    COMPLETE_INJECTION = "COMPLETE_INJECTION"
     EMERGENCY_STOP = "EMERGENCY_STOP"
     RESET_EMERGENCY = "RESET_EMERGENCY"
 
@@ -54,6 +55,9 @@ COMMAND_TRANSITIONS: dict[Operation, dict[AppState, AppState]] = {
     },
     Operation.MANUAL_INJECTION: {
         AppState.RUNNING: AppState.INJECTION,
+    },
+    Operation.COMPLETE_INJECTION: {
+        AppState.INJECTION: AppState.RUNNING,
     },
     Operation.EMERGENCY_STOP: {
         AppState.IDLE: AppState.EMERGENCY,
@@ -111,3 +115,7 @@ class StateMachine:
             raise StateTransitionError(
                 f"Operation {operation.value} is forbidden in state {AppState.EMERGENCY.value}"
             )
+
+    def enter_fault(self) -> AppState:
+        """Force the application into FAULT state."""
+        return self.transition_to(AppState.FAULT)

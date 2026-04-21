@@ -6,6 +6,10 @@ import sys
 from uuid import uuid4
 from zipfile import ZipFile
 import json
+from core.config_model import InjectionProfile, JsonStandConfigStorage, StandConfig
+from core.cycle import CycleStage, PulsePlanner
+from core.errors import DeviceProtocolError
+from core.service_api import ApplicationApi
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -73,6 +77,28 @@ class ControllerSafetyTests(unittest.TestCase):
         controller.reset_emergency()
 
         self.assertEqual(controller.state, AppState.STOPPED)
+
+    def test_device_protocol_error_transitions_to_fault(self) -> None:
+        class BrokenPressureSensor(MockPressureSensor):
+            def read_pressure(self) -> float:
+                raise DeviceProtocolError("bad frame")
+
+        logger = logging.getLogger("controller-test-error")
+        logger.disabled = True
+        controller = Controller(
+            compressor=MockActuator(),
+            valve=MockActuator(),
+            pressure_sensor=BrokenPressureSensor([1.0]),
+            pressure_min=0.8,
+            pressure_max=1.5,
+            logger=logger,
+        )
+        controller.state_machine.transition_to(AppState.READY)
+        controller.start()
+
+        state = controller.manual_injection()
+
+        self.assertEqual(state, AppState.FAULT)
 
 
 class ApplicationInfrastructureTests(unittest.TestCase):
@@ -252,6 +278,49 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             self.assertEqual(config.compressor_enable.pin_bcm, 17)
             self.assertEqual(config.injection_valve.pin_bcm, 27)
             self.assertEqual(config.emergency_input.pin_bcm, 22)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_stand_config_validates_and_loads_defaults(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            storage = JsonStandConfigStorage(data_dir / "config.json")
+            config = storage.load()
+
+            self.assertEqual(config.schema_version, 1)
+            self.assertIn("default", config.injection_profiles)
+            self.assertTrue(config.calibration.control_points)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_pulse_planner_builds_expected_schedule(self) -> None:
+        planner = PulsePlanner()
+        profile = InjectionProfile(
+            name="fast",
+            duration_seconds=0.2,
+            interval_seconds=1.5,
+            count=3,
+            cycle_seconds=6.0,
+        )
+
+        plan = planner.plan(profile)
+
+        self.assertEqual([pulse.index for pulse in plan], [1, 2, 3])
+        self.assertEqual([pulse.at_seconds for pulse in plan], [0.0, 1.5, 3.0])
+
+    def test_internal_api_exposes_cycle_and_events(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            app = self.build_app(data_dir, pressure=1.0)
+            app.bootstrap()
+            api = ApplicationApi(app)
+
+            telemetry = api.start_cycle()
+            events = api.poll_events()
+
+            self.assertEqual(telemetry["cycle"]["stage"], CycleStage.COMPLETED.value)
+            self.assertTrue(events)
+            self.assertEqual(events[0].name, "cycle_state_changed")
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
