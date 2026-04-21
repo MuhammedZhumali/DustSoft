@@ -1,0 +1,16 @@
+[Unit]
+Description=DustSoft operator console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/dustsoft
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/dustsoft/.venv/bin/python -m src.main gui
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

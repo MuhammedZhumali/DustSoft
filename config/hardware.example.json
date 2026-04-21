@@ -1,0 +1,20 @@
+{
+  "mode": "mock",
+  "gpio": {
+    "compressor_enable": {
+      "pin_bcm": 17,
+      "active_level": 1,
+      "safe_level": 0
+    },
+    "injection_valve": {
+      "pin_bcm": 27,
+      "active_level": 1,
+      "safe_level": 0
+    },
+    "emergency_input": {
+      "pin_bcm": 22,
+      "active_level": 0,
+      "pull": "up"
+    }
+  }
+}
