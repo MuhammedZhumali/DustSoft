@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from core.application import Application
+from devices.config import GpioInputConfig, GpioOutputConfig, HardwareConfig
 
 
 class DustSoftUI:
@@ -15,9 +16,11 @@ class DustSoftUI:
         self.app = app
         self.root = tk.Tk()
         self.root.title("DustSoft Operator Console")
-        self.root.geometry("1180x760")
-        self.root.minsize(980, 640)
+        self.root.geometry("1280x820")
+        self.root.minsize(1040, 700)
         self._refresh_job: str | None = None
+
+        hardware = self.app.hardware_config or HardwareConfig()
 
         self.status_var = tk.StringVar(value="Ready")
         self.telemetry_vars = {
@@ -32,10 +35,27 @@ class DustSoftUI:
             "software_version": tk.StringVar(value="-"),
             "data_directory": tk.StringVar(value="-"),
             "settings_file": tk.StringVar(value="-"),
+            "hardware_config_file": tk.StringVar(value="-"),
             "log_export_directory": tk.StringVar(value="-"),
             "remote_policy": tk.StringVar(value="-"),
             "device_summary": tk.StringVar(value="-"),
         }
+
+        self.hardware_mode_var = tk.StringVar(value=hardware.mode)
+        self.hardware_dry_run_var = tk.BooleanVar(value=hardware.dry_run)
+        self.hardware_notes_var = tk.StringVar(value=hardware.notes)
+        self.compressor_pin_var = tk.StringVar(value=str(hardware.compressor_enable.pin_bcm))
+        self.compressor_active_var = tk.StringVar(value=str(hardware.compressor_enable.active_level))
+        self.compressor_safe_var = tk.StringVar(value=str(hardware.compressor_enable.safe_level))
+        self.valve_pin_var = tk.StringVar(value=str(hardware.injection_valve.pin_bcm))
+        self.valve_active_var = tk.StringVar(value=str(hardware.injection_valve.active_level))
+        self.valve_safe_var = tk.StringVar(value=str(hardware.injection_valve.safe_level))
+        self.emergency_pin_var = tk.StringVar(value=str(hardware.emergency_input.pin_bcm))
+        self.emergency_active_var = tk.StringVar(value=str(hardware.emergency_input.active_level))
+        self.emergency_pull_var = tk.StringVar(value=hardware.emergency_input.pull)
+        self.diagnostic_target_var = tk.StringVar(value="compressor")
+        self.diagnostic_pin_var = tk.StringVar(value=self.compressor_pin_var.get())
+        self.diagnostic_result_var = tk.StringVar(value="-")
 
         self.injection_duration_var = tk.StringVar(
             value=str(self.app.injection_settings.duration_seconds)
@@ -88,18 +108,21 @@ class DustSoftUI:
         self.injection_frame = ttk.Frame(notebook, padding=16)
         self.pressure_frame = ttk.Frame(notebook, padding=16)
         self.journal_frame = ttk.Frame(notebook, padding=16)
+        self.hardware_frame = ttk.Frame(notebook, padding=16)
         self.info_frame = ttk.Frame(notebook, padding=16)
 
         notebook.add(self.main_frame, text="Главный")
         notebook.add(self.injection_frame, text="Настройка впрыска")
         notebook.add(self.pressure_frame, text="Настройка давления")
         notebook.add(self.journal_frame, text="Журнал")
+        notebook.add(self.hardware_frame, text="Hardware Mapping")
         notebook.add(self.info_frame, text="Об установке")
 
         self._build_main_screen()
         self._build_injection_screen()
         self._build_pressure_screen()
         self._build_journal_screen()
+        self._build_hardware_screen()
         self._build_info_screen()
 
     def _build_main_screen(self) -> None:
@@ -276,6 +299,104 @@ class DustSoftUI:
         scrollbar.grid(row=1, column=1, sticky="ns")
         self.journal_tree.configure(yscrollcommand=scrollbar.set)
 
+    def _build_hardware_screen(self) -> None:
+        self.hardware_frame.columnconfigure(0, weight=1)
+        self.hardware_frame.columnconfigure(1, weight=1)
+
+        mapping_frame = ttk.LabelFrame(
+            self.hardware_frame, text="Персональная конфигурация железа", padding=16
+        )
+        mapping_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
+        mapping_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(mapping_frame, text="Режим").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            mapping_frame,
+            textvariable=self.hardware_mode_var,
+            values=("mock", "raspberry_pi"),
+            state="readonly",
+        ).grid(row=0, column=1, sticky="ew", pady=4, padx=(12, 0))
+        ttk.Checkbutton(
+            mapping_frame,
+            text="Dry-run (без реальных переключений GPIO)",
+            variable=self.hardware_dry_run_var,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=4)
+
+        ttk.Label(mapping_frame, text="Заметка").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(mapping_frame, textvariable=self.hardware_notes_var).grid(
+            row=2, column=1, sticky="ew", pady=4, padx=(12, 0)
+        )
+
+        rows = [
+            ("Компрессор BCM", self.compressor_pin_var),
+            ("Компрессор active", self.compressor_active_var),
+            ("Компрессор safe", self.compressor_safe_var),
+            ("Клапан BCM", self.valve_pin_var),
+            ("Клапан active", self.valve_active_var),
+            ("Клапан safe", self.valve_safe_var),
+            ("Авария BCM", self.emergency_pin_var),
+            ("Авария active", self.emergency_active_var),
+            ("Авария pull", self.emergency_pull_var),
+        ]
+        for index, (label, variable) in enumerate(rows, start=3):
+            ttk.Label(mapping_frame, text=label).grid(row=index, column=0, sticky="w", pady=4)
+            if label.endswith("pull"):
+                widget = ttk.Combobox(
+                    mapping_frame,
+                    textvariable=variable,
+                    values=("up", "down"),
+                    state="readonly",
+                )
+            else:
+                widget = ttk.Entry(mapping_frame, textvariable=variable)
+            widget.grid(row=index, column=1, sticky="ew", pady=4, padx=(12, 0))
+
+        ttk.Button(
+            mapping_frame,
+            text="Сохранить hardware mapping",
+            command=self._save_hardware_mapping,
+        ).grid(row=12, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+        diagnostic_frame = ttk.LabelFrame(self.hardware_frame, text="Диагностика GPIO", padding=16)
+        diagnostic_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 8))
+        diagnostic_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(diagnostic_frame, text="Линия").grid(row=0, column=0, sticky="w", pady=4)
+        target_box = ttk.Combobox(
+            diagnostic_frame,
+            textvariable=self.diagnostic_target_var,
+            values=("compressor", "valve", "emergency"),
+            state="readonly",
+        )
+        target_box.grid(row=0, column=1, sticky="ew", pady=4, padx=(12, 0))
+        target_box.bind("<<ComboboxSelected>>", lambda _event: self._sync_diagnostic_pin())
+
+        ttk.Label(diagnostic_frame, text="BCM pin").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(diagnostic_frame, textvariable=self.diagnostic_pin_var).grid(
+            row=1, column=1, sticky="ew", pady=4, padx=(12, 0)
+        )
+        ttk.Button(
+            diagnostic_frame,
+            text="Установить HIGH",
+            command=lambda: self._diagnostic_set_level(1),
+        ).grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(
+            diagnostic_frame,
+            text="Установить LOW",
+            command=lambda: self._diagnostic_set_level(0),
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(
+            diagnostic_frame,
+            text="Прочитать вход",
+            command=self._diagnostic_read_input,
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Label(
+            diagnostic_frame,
+            textvariable=self.diagnostic_result_var,
+            wraplength=420,
+            justify="left",
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
     def _build_info_screen(self) -> None:
         frame = ttk.LabelFrame(self.info_frame, text="Информация о системе", padding=16)
         frame.grid(row=0, column=0, sticky="nsew")
@@ -286,6 +407,7 @@ class DustSoftUI:
             ("Версия ПО", self.info_vars["software_version"]),
             ("Каталог данных", self.info_vars["data_directory"]),
             ("Файл настроек", self.info_vars["settings_file"]),
+            ("Файл hardware config", self.info_vars["hardware_config_file"]),
             ("Каталог архивов логов", self.info_vars["log_export_directory"]),
             ("Политика удаленного доступа", self.info_vars["remote_policy"]),
             ("Сводка по устройствам", self.info_vars["device_summary"]),
@@ -330,6 +452,60 @@ class DustSoftUI:
         )
         self.status_var.set("Настройки давления сохранены")
         self._refresh_all()
+
+    def _save_hardware_mapping(self) -> None:
+        config = HardwareConfig(
+            mode=self.hardware_mode_var.get(),
+            dry_run=bool(self.hardware_dry_run_var.get()),
+            notes=self.hardware_notes_var.get().strip(),
+            compressor_enable=GpioOutputConfig(
+                pin_bcm=int(self.compressor_pin_var.get()),
+                active_level=int(self.compressor_active_var.get()),
+                safe_level=int(self.compressor_safe_var.get()),
+            ),
+            injection_valve=GpioOutputConfig(
+                pin_bcm=int(self.valve_pin_var.get()),
+                active_level=int(self.valve_active_var.get()),
+                safe_level=int(self.valve_safe_var.get()),
+            ),
+            emergency_input=GpioInputConfig(
+                pin_bcm=int(self.emergency_pin_var.get()),
+                active_level=int(self.emergency_active_var.get()),
+                pull=self.emergency_pull_var.get(),
+            ),
+        )
+        self.app.update_hardware_config(config)
+        self.status_var.set("Hardware mapping сохранен")
+        self._sync_diagnostic_pin()
+        self._refresh_all()
+
+    def _sync_diagnostic_pin(self) -> None:
+        mapping = {
+            "compressor": self.compressor_pin_var.get(),
+            "valve": self.valve_pin_var.get(),
+            "emergency": self.emergency_pin_var.get(),
+        }
+        self.diagnostic_pin_var.set(mapping.get(self.diagnostic_target_var.get(), "0"))
+
+    def _diagnostic_set_level(self, level: int) -> None:
+        if self.app.gpio_diagnostics is None:
+            raise RuntimeError("GPIO diagnostics backend is not available")
+        pin = int(self.diagnostic_pin_var.get())
+        result = self.app.gpio_diagnostics.set_output_level(pin, level)
+        mode = self.hardware_mode_var.get()
+        dry = "dry-run" if self.hardware_dry_run_var.get() else "live"
+        self.diagnostic_result_var.set(
+            f"Pin BCM {pin} set to {result} in {mode}/{dry} diagnostic mode"
+        )
+
+    def _diagnostic_read_input(self) -> None:
+        if self.app.gpio_diagnostics is None:
+            raise RuntimeError("GPIO diagnostics backend is not available")
+        pin = int(self.diagnostic_pin_var.get())
+        level = self.app.gpio_diagnostics.read_input_level(
+            pin, pull=self.emergency_pull_var.get()
+        )
+        self.diagnostic_result_var.set(f"Pin BCM {pin} input level: {level}")
 
     @staticmethod
     def _parse_user_parameters(raw_value: str) -> dict[str, str]:
@@ -378,6 +554,7 @@ class DustSoftUI:
         self.info_vars["software_version"].set(info["software_version"])
         self.info_vars["data_directory"].set(info["data_directory"])
         self.info_vars["settings_file"].set(info["settings_file"])
+        self.info_vars["hardware_config_file"].set(info["hardware_config_file"])
         self.info_vars["log_export_directory"].set(info["log_export_directory"])
         self.info_vars["remote_policy"].set(
             "TLS обязателен: {tls}; токенов: {tokens}; сертификатов: {certs}; связь: {link}".format(

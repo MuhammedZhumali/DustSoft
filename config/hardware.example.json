@@ -1,5 +1,8 @@
 {
+  "schema_version": 1,
   "mode": "mock",
+  "dry_run": true,
+  "notes": "Temporary pin mapping; verify against real hardware before live operation.",
   "gpio": {
     "compressor_enable": {
       "pin_bcm": 17,

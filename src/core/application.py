@@ -13,6 +13,7 @@ from core.errors import DeviceProtocolError, DeviceTimeout, SafetyViolation
 from core.service_api import ApplicationApi
 from core.controller import Controller
 from core.state_machine import AppState
+from devices.config import HardwareConfig, save_hardware_config
 from logging_system import JournalEntry, JsonLineJournal, JournalService
 from devices.ports import ActuatorPort, PressureSensorPort, ReferenceMeterPort
 from remote import RemoteAccessPolicy, RemoteService
@@ -44,9 +45,14 @@ class Application:
     config_storage: JsonStandConfigStorage | None = None
     journal: JournalService | None = None
     remote_access_policy: RemoteAccessPolicy = field(default_factory=RemoteAccessPolicy)
+    hardware_config: HardwareConfig | None = None
+    hardware_config_path: Path | None = None
+    gpio_backend: object | None = None
+    gpio_diagnostics: object | None = None
 
     def __post_init__(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.hardware_config_path = self.hardware_config_path or (self.data_dir / "hardware.json")
         self.software_version = _resolve_version()
         self.settings_storage = self.settings_storage or JsonSettingsStorage(
             self.data_dir / "settings.json"
@@ -278,6 +284,7 @@ class Application:
             "software_version": self.software_version,
             "data_directory": str(self.data_dir.resolve()),
             "settings_file": str(self.settings_storage.path.resolve()),
+            "hardware_config_file": str(self.hardware_config_path.resolve()),
             "config_file": str(self.config_storage.path.resolve()),
             "config_schema_version": self.stand_config.schema_version,
             "log_export_directory": str((self.data_dir / "exports").resolve()),
@@ -290,7 +297,18 @@ class Application:
                 "link_active": self.remote_link_active,
             },
             "devices": self.snapshot_state()["devices"],
+            "hardware": self.hardware_config.to_mapping() if self.hardware_config else {},
         }
+
+    def update_hardware_config(self, config: HardwareConfig) -> HardwareConfig:
+        save_hardware_config(self.hardware_config_path, config)
+        self.hardware_config = config
+        self.journal.log_technical(
+            event_type="hardware_config_updated",
+            description="Hardware mapping updated and persisted",
+            system_snapshot=self.snapshot_state(),
+        )
+        return config
 
     def export_logs_archive(self) -> Path:
         archive_path = self.journal.export_archive(self.data_dir / "exports")

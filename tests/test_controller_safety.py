@@ -15,9 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from core.application import Application
 from core.controller import Controller
-from devices.config import load_hardware_config
+from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from core.state_machine import AppState, StateTransitionError
 from devices.mocks import MockActuator, MockPressureSensor, MockReferenceMeter
+from devices.raspberry_pi import GpioDiagnosticService, MemoryGpioBackend
 from remote import RemoteAccessPolicy, RemoteRequestContext, RemoteSecurityError
 from safety.interlock import InterlockError
 
@@ -261,7 +262,10 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             config_path.write_text(
                 json.dumps(
                     {
+                        "schema_version": 1,
                         "mode": "raspberry_pi",
+                        "dry_run": True,
+                        "notes": "temporary",
                         "gpio": {
                             "compressor_enable": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
                             "injection_valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
@@ -275,11 +279,36 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             config = load_hardware_config(config_path)
 
             self.assertEqual(config.mode, "raspberry_pi")
+            self.assertEqual(config.dry_run, True)
             self.assertEqual(config.compressor_enable.pin_bcm, 17)
             self.assertEqual(config.injection_valve.pin_bcm, 27)
             self.assertEqual(config.emergency_input.pin_bcm, 22)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_hardware_config_persists_personal_mapping(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            config_path = data_dir / "hardware.json"
+            config = HardwareConfig(dry_run=False, notes="personal mapping")
+            save_hardware_config(config_path, config)
+
+            restored = load_hardware_config(config_path)
+
+            self.assertEqual(restored.notes, "personal mapping")
+            self.assertEqual(restored.dry_run, False)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_gpio_diagnostic_service_sets_and_reads_levels(self) -> None:
+        backend = MemoryGpioBackend()
+        diagnostics = GpioDiagnosticService(backend)
+
+        written = diagnostics.set_output_level(17, 1)
+        read = diagnostics.read_input_level(22, pull="up")
+
+        self.assertEqual(written, 1)
+        self.assertEqual(read, 1)
 
     def test_stand_config_validates_and_loads_defaults(self) -> None:
         data_dir = self.make_data_dir()

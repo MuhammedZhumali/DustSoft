@@ -6,24 +6,34 @@ import argparse
 from pathlib import Path
 
 from core.application import Application
-from devices.config import HardwareConfig, load_hardware_config
+from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from devices.mocks import MockActuator, MockPressureSensor, MockReferenceMeter
-from devices.raspberry_pi import MemoryGpioBackend, RPiGpioBackend, RaspberryPiActuator
+from devices.raspberry_pi import (
+    GpioDiagnosticService,
+    MemoryGpioBackend,
+    RPiGpioBackend,
+    RaspberryPiActuator,
+)
 from ui import launch_ui
 
 
 def _build_devices(config: HardwareConfig):
+    backend = None
     if config.mode == "raspberry_pi":
-        try:
-            backend = RPiGpioBackend()
-        except Exception:
+        if config.dry_run:
             backend = MemoryGpioBackend()
+        else:
+            try:
+                backend = RPiGpioBackend()
+            except Exception:
+                backend = MemoryGpioBackend()
 
         return {
             "compressor": RaspberryPiActuator(config.compressor_enable, backend),
             "valve": RaspberryPiActuator(config.injection_valve, backend),
             "pressure_sensor": MockPressureSensor(),
             "reference_meter": MockReferenceMeter(),
+            "gpio_backend": backend,
         }
 
     return {
@@ -31,6 +41,7 @@ def _build_devices(config: HardwareConfig):
         "valve": MockActuator(),
         "pressure_sensor": MockPressureSensor(),
         "reference_meter": MockReferenceMeter(),
+        "gpio_backend": MemoryGpioBackend(),
     }
 
 
@@ -39,7 +50,10 @@ def build_app(config_path: Path | None = None) -> Application:
 
     Uses mock adapters by default so the app can run without real hardware.
     """
-    config = load_hardware_config(config_path or Path("data") / "hardware.json")
+    config_path = config_path or Path("data") / "hardware.json"
+    if not config_path.exists():
+        save_hardware_config(config_path, HardwareConfig())
+    config = load_hardware_config(config_path)
     devices = _build_devices(config)
     return Application(
         compressor=devices["compressor"],
@@ -47,6 +61,10 @@ def build_app(config_path: Path | None = None) -> Application:
         pressure_sensor=devices["pressure_sensor"],
         reference_meter=devices["reference_meter"],
         data_dir=Path("data"),
+        hardware_config=config,
+        hardware_config_path=config_path,
+        gpio_backend=devices["gpio_backend"],
+        gpio_diagnostics=GpioDiagnosticService(devices["gpio_backend"]),
     )
 
 

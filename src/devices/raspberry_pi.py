@@ -34,6 +34,10 @@ class GpioBackend:
     def cleanup(self) -> None:
         """Release resources if backend needs it."""
 
+    def snapshot_levels(self) -> dict[int, int]:
+        """Return known GPIO levels when backend supports introspection."""
+        return {}
+
 
 class MemoryGpioBackend(GpioBackend):
     """In-memory backend useful for development and dry runs."""
@@ -52,6 +56,9 @@ class MemoryGpioBackend(GpioBackend):
 
     def read(self, pin_bcm: int) -> int:
         return self.levels.get(pin_bcm, 0)
+
+    def snapshot_levels(self) -> dict[int, int]:
+        return dict(self.levels)
 
 
 class RPiGpioBackend(GpioBackend):
@@ -111,3 +118,22 @@ class RaspberryPiActuator:
             self.stop()
             return
         self.start()
+
+
+class GpioDiagnosticService:
+    """Manual GPIO diagnostics that never invoke the process controller."""
+
+    def __init__(self, backend: GpioBackend) -> None:
+        self.backend = backend
+
+    def set_output_level(self, pin_bcm: int, level: int) -> int:
+        self.backend.setup_output(pin_bcm, initial=level)
+        self.backend.write(pin_bcm, level)
+        return self.backend.read(pin_bcm)
+
+    def read_input_level(self, pin_bcm: int, *, pull: str = GpioBackend.PUD_UP) -> int:
+        self.backend.setup_input(pin_bcm, pull=pull)
+        return self.backend.read(pin_bcm)
+
+    def snapshot(self) -> dict[int, int]:
+        return self.backend.snapshot_levels()
