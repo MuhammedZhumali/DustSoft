@@ -40,11 +40,28 @@ class PressureDriver(Protocol):
         """Return current pressure in bar."""
 
 
+class DualPressureDriver(Protocol):
+    is_connected: bool
+
+    def read_pressure_high(self) -> float:
+        """Return D1 high-pressure channel in bar."""
+
+    def read_pressure_low(self) -> float:
+        """Return D2 low-pressure channel in bar."""
+
+
 class ReferenceMeterDriver(Protocol):
     is_connected: bool
 
     def read_reference_value(self) -> float:
-        """Return current reference measurement."""
+        """Return current reference concentration in mg/m3."""
+
+
+class EmergencyButtonDriver(Protocol):
+    is_connected: bool
+
+    def is_pressed(self) -> bool:
+        """Return True when the emergency stop button is active."""
 
 
 class CalibratedMeterDriver(Protocol):

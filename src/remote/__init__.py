@@ -45,7 +45,7 @@ class RemoteService:
         snapshot = self.app.snapshot_state()
         self.app.journal.log_event(
             event_type="remote_monitor",
-            description=f"Remote monitor by {principal} ({context.client_id})",
+            description=f"Удаленный просмотр состояния: {principal} ({context.client_id})",
             system_snapshot=snapshot,
         )
         return snapshot
@@ -56,7 +56,10 @@ class RemoteService:
         snapshot = self.app.snapshot_state()
         self.app.journal.log_alarm(
             event_type="remote_emergency_stop",
-            description=f"Remote emergency stop by {principal} ({context.client_id}): {reason}",
+            description=(
+                f"Удаленная аварийная остановка: {principal} "
+                f"({context.client_id}), причина: {reason}"
+            ),
             system_snapshot=snapshot,
         )
         return snapshot
@@ -67,8 +70,8 @@ class RemoteService:
         self.app.journal.log_technical(
             event_type="remote_link_degraded",
             description=(
-                "Remote connection lost; local safety controls remain authoritative. "
-                f"Reason: {reason}"
+                "Удаленное соединение потеряно; локальные средства безопасности "
+                f"остаются приоритетными. Причина: {reason}"
             ),
             system_snapshot=self.app.snapshot_state(),
         )
@@ -78,7 +81,7 @@ class RemoteService:
         self.app.remote_link_active = True
         self.app.journal.log_technical(
             event_type="remote_link_restored",
-            description=f"Remote connection restored: {reason}",
+            description=f"Удаленное соединение восстановлено: {reason}",
             system_snapshot=self.app.snapshot_state(),
         )
 

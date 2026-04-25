@@ -42,13 +42,15 @@ class PulsePlanner:
     """Convert injection profiles into a deterministic pulse plan."""
 
     def plan(self, profile: InjectionProfile) -> list[PulseCommand]:
+        if profile.cycles is None:
+            raise ValueError("Infinite injection profile cannot be expanded into a finite plan")
         return [
             PulseCommand(
                 index=index + 1,
-                at_seconds=index * profile.interval_seconds,
-                duration_seconds=profile.duration_seconds,
+                at_seconds=index * profile.off_duration_seconds,
+                duration_seconds=profile.on_duration_seconds,
             )
-            for index in range(profile.count)
+            for index in range(profile.cycles)
         ]
 
 
@@ -80,7 +82,7 @@ class TechnologyCycleService:
             self.state.current_control_point = control_point
             self.app.journal.log_event(
                 event_type="cycle_control_point",
-                description=f"Reached control point {control_point:.3f}",
+                description=f"Достигнута контрольная точка {control_point:.3f}",
                 system_snapshot=self.app.snapshot_state(),
             )
 

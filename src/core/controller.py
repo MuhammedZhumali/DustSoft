@@ -21,11 +21,15 @@ class Controller:
     compressor: ActuatorPort
     valve: ActuatorPort
     pressure_sensor: PressureSensorPort
+    pressure_low_sensor: PressureSensorPort | None = None
     pressure_min: float = 0.8
     pressure_max: float = 1.5
+    pressure_low_min: float = 0.0
+    pressure_low_max: float = 0.5
     logger: logging.Logger = LOGGER
     state_machine: StateMachine = field(default_factory=StateMachine)
     last_pressure: float | None = None
+    last_pressure_low: float | None = None
 
     @property
     def state(self) -> AppState:
@@ -37,7 +41,7 @@ class Controller:
         try:
             next_state = self.state_machine.apply(Operation.START)
             self.compressor.start()
-            self.logger.info("Controller started")
+            self.logger.info("Контроллер запущен")
             return next_state
         except (DeviceTimeout, DeviceProtocolError, SafetyViolation) as exc:
             return self._handle_runtime_error(exc, source="start")
@@ -46,7 +50,7 @@ class Controller:
         """Stop normal operation and leave devices in a safe idle state."""
         next_state = self.state_machine.apply(Operation.STOP)
         self._safe_stop_devices()
-        self.logger.info("Controller stopped")
+        self.logger.info("Контроллер остановлен")
         return next_state
 
     def manual_injection(self) -> AppState:
@@ -57,6 +61,8 @@ class Controller:
             interlock.ensure_devices_connected(self._devices())
             pressure = self.pressure_sensor.read_pressure()
             self.last_pressure = pressure
+            if self.pressure_low_sensor is not None:
+                self.last_pressure_low = self.pressure_low_sensor.read_pressure()
             interlock.ensure_injection_allowed(
                 state=self.state,
                 pressure=pressure,
@@ -64,9 +70,10 @@ class Controller:
             )
 
             next_state = self.state_machine.apply(Operation.MANUAL_INJECTION)
-            self.compressor.start()
+            if not bool(getattr(self.compressor, "is_running", False)):
+                raise SafetyViolation("valve cannot open while compressor is stopped")
             self.valve.start()
-            self.logger.info("Manual injection started at pressure %.3f", pressure)
+            self.logger.info("Ручной впрыск начат при давлении %.3f бар", pressure)
             return next_state
         except (DeviceTimeout, DeviceProtocolError, SafetyViolation) as exc:
             return self._handle_runtime_error(exc, source="manual_injection")
@@ -75,21 +82,21 @@ class Controller:
         """Return from INJECTION to RUNNING after a pulse completes."""
         next_state = self.state_machine.apply(Operation.COMPLETE_INJECTION)
         self.valve.stop()
-        self.logger.info("Injection pulse completed")
+        self.logger.info("Импульс впрыска завершен")
         return next_state
 
     def emergency_stop(self, source: str) -> AppState:
         """Enter emergency state and force devices to a safe state."""
         self._safe_stop_devices()
         next_state = self.state_machine.apply(Operation.EMERGENCY_STOP)
-        self.logger.critical("Emergency stop from %s", source)
+        self.logger.critical("Аварийная остановка, источник: %s", source)
         return next_state
 
     def reset_emergency(self) -> AppState:
         """Reset an emergency after external causes have been cleared."""
         next_state = self.state_machine.apply(Operation.RESET_EMERGENCY)
         self._safe_stop_devices()
-        self.logger.info("Emergency reset")
+        self.logger.info("Аварийное состояние сброшено")
         return next_state
 
     def _interlock(self) -> Interlock:
@@ -99,11 +106,14 @@ class Controller:
         )
 
     def _devices(self) -> dict[str, object]:
-        return {
+        devices = {
             "compressor": self.compressor,
             "valve": self.valve,
             "pressure_sensor": self.pressure_sensor,
         }
+        if self.pressure_low_sensor is not None:
+            devices["pressure_low_sensor"] = self.pressure_low_sensor
+        return devices
 
     def _safe_stop_devices(self) -> None:
         """Close the injection path and stop pressure generation."""
@@ -114,7 +124,7 @@ class Controller:
             try:
                 stop()
             except Exception:
-                self.logger.exception("Failed to stop %s during safe shutdown", name)
+                self.logger.exception("Не удалось остановить %s при безопасном останове", name)
 
     def _handle_runtime_error(
         self,
@@ -123,10 +133,10 @@ class Controller:
         source: str,
     ) -> AppState:
         if isinstance(exc, SafetyViolation):
-            self.logger.critical("Safety violation during %s: %s", source, exc)
+            self.logger.critical("Нарушение безопасности при операции %s: %s", source, exc)
             return self.emergency_stop(f"{source}:{type(exc).__name__}")
 
         self._safe_stop_devices()
         next_state = self.state_machine.enter_fault()
-        self.logger.error("Device failure during %s: %s", source, exc)
+        self.logger.error("Ошибка устройства при операции %s: %s", source, exc)
         return next_state

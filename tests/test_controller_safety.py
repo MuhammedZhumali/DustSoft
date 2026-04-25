@@ -10,6 +10,8 @@ from core.config_model import InjectionProfile, JsonStandConfigStorage, StandCon
 from core.cycle import CycleStage, PulsePlanner
 from core.errors import DeviceProtocolError
 from core.service_api import ApplicationApi
+from reference_meter.dusttrak import parse_concentration
+from services.injection_scheduler import InjectionSchedulerError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -17,7 +19,7 @@ from core.application import Application
 from core.controller import Controller
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from core.state_machine import AppState, StateTransitionError
-from devices.mocks import MockActuator, MockPressureSensor, MockReferenceMeter
+from devices.mocks import MockActuator, MockEmergencyButton, MockPressureSensor, MockReferenceMeter
 from devices.raspberry_pi import GpioDiagnosticService, MemoryGpioBackend
 from remote import RemoteAccessPolicy, RemoteRequestContext, RemoteSecurityError
 from safety.interlock import InterlockError
@@ -157,7 +159,7 @@ class ApplicationInfrastructureTests(unittest.TestCase):
 
             self.assertTrue(entry.timestamp)
             self.assertEqual(entry.event_type, "start")
-            self.assertIn("Local start", entry.description)
+            self.assertIn("локальная команда запуска", entry.description.lower())
             self.assertIn("state", entry.system_snapshot)
             self.assertIn("devices", entry.system_snapshot)
             self.assertTrue(history_files)
@@ -352,6 +354,79 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             self.assertEqual(events[0].name, "cycle_state_changed")
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_interval_injection_archives_measurements(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            app = self.build_app(data_dir, pressure=1.0)
+            app.injection_scheduler.sleep = lambda _seconds: None
+            app.bootstrap()
+            app.start()
+            app.configure_injection(duration_seconds=0.1, interval_seconds=0.1, count=2)
+
+            result = app.run_interval_injection()
+
+            archive_path = app.measurement_archive.path_for_test(app.current_test_id)
+            self.assertEqual(result.completed_cycles, 2)
+            self.assertEqual(app.state, AppState.STOPPED)
+            self.assertFalse(app.compressor.is_running)
+            self.assertTrue(archive_path.exists())
+            self.assertIn("pressure_high", archive_path.read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_interrupt_interval_injection_stops_application(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            app = self.build_app(data_dir, pressure=1.0)
+            app.bootstrap()
+            app.start()
+
+            result = app.interrupt_interval_injection("test_stop")
+
+            self.assertTrue(result.interrupted)
+            self.assertEqual(app.state, AppState.STOPPED)
+            self.assertFalse(app.compressor.is_running)
+            self.assertFalse(app.valve.is_running)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_interval_injection_requires_running_compressor(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            app = self.build_app(data_dir, pressure=1.0)
+            app.injection_scheduler.sleep = lambda _seconds: None
+            app.bootstrap()
+
+            with self.assertRaises(InjectionSchedulerError):
+                app.run_interval_injection()
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_emergency_button_triggers_safe_state_from_telemetry(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            app = Application(
+                compressor=MockActuator(),
+                valve=MockActuator(),
+                pressure_sensor=MockPressureSensor([1.0]),
+                reference_meter=MockReferenceMeter(),
+                data_dir=data_dir,
+                emergency_button=MockEmergencyButton(pressed=True),
+            )
+            app.bootstrap()
+            app.start()
+
+            telemetry = app.read_telemetry()
+
+            self.assertEqual(telemetry["state"], AppState.EMERGENCY.value)
+            self.assertFalse(app.compressor.is_running)
+            self.assertFalse(app.valve.is_running)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_dusttrak_parser_extracts_concentration(self) -> None:
+        self.assertEqual(parse_concentration("DustTrak,PM,0.123"), 0.123)
 
 
 if __name__ == "__main__":

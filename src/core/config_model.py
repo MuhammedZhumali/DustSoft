@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import InitVar, asdict, dataclass, field
 from pathlib import Path
 
 
@@ -12,17 +12,37 @@ CONFIG_SCHEMA_VERSION = 1
 
 @dataclass(slots=True)
 class PressureConfig:
-    minimum_bar: float = 0.8
+    minimum_bar: float = 0.0
     maximum_bar: float = 1.5
+    low_minimum_bar: float = 0.0
+    low_maximum_bar: float = 0.5
 
 
 @dataclass(slots=True)
 class InjectionProfile:
     name: str = "default"
-    duration_seconds: float = 0.1
-    interval_seconds: float = 5.0
-    count: int = 1
+    on_duration_seconds: float = 0.1
+    off_duration_seconds: float = 5.0
+    cycles: int | None = 1
+    mode: str = "fixed"
+    target_concentration_mg_m3: float | None = None
     cycle_seconds: float = 10.0
+    duration_seconds: InitVar[float | None] = None
+    interval_seconds: InitVar[float | None] = None
+    count: InitVar[int | None] = None
+
+    def __post_init__(
+        self,
+        duration_seconds: float | None,
+        interval_seconds: float | None,
+        count: int | None,
+    ) -> None:
+        if duration_seconds is not None:
+            self.on_duration_seconds = duration_seconds
+        if interval_seconds is not None:
+            self.off_duration_seconds = interval_seconds
+        if count is not None:
+            self.cycles = count
 
 
 @dataclass(slots=True)
@@ -52,21 +72,29 @@ class StandConfig:
                 f"expected {CONFIG_SCHEMA_VERSION}"
             )
 
-        if self.pressure.minimum_bar <= 0 or self.pressure.maximum_bar <= 0:
+        if self.pressure.minimum_bar < 0 or self.pressure.maximum_bar <= 0:
             raise ValueError("Pressure limits must be positive")
         if self.pressure.minimum_bar >= self.pressure.maximum_bar:
             raise ValueError("Pressure minimum must be lower than pressure maximum")
+        if self.pressure.low_minimum_bar < 0 or self.pressure.low_maximum_bar <= 0:
+            raise ValueError("Low-pressure limits must be positive")
+        if self.pressure.low_minimum_bar >= self.pressure.low_maximum_bar:
+            raise ValueError("Low-pressure minimum must be lower than maximum")
 
         if not self.injection_profiles:
             raise ValueError("At least one injection profile must be configured")
 
         for profile_name, profile in self.injection_profiles.items():
-            if profile.duration_seconds <= 0:
+            if profile.on_duration_seconds <= 0:
                 raise ValueError(f"Injection profile {profile_name} has invalid duration")
-            if profile.interval_seconds <= 0:
+            if profile.off_duration_seconds <= 0:
                 raise ValueError(f"Injection profile {profile_name} has invalid interval")
-            if profile.count <= 0:
-                raise ValueError(f"Injection profile {profile_name} must have positive count")
+            if profile.cycles is not None and profile.cycles <= 0:
+                raise ValueError(f"Injection profile {profile_name} must have positive cycles")
+            if profile.mode not in {"fixed", "concentration"}:
+                raise ValueError(f"Injection profile {profile_name} has unsupported mode")
+            if profile.mode == "concentration" and profile.target_concentration_mg_m3 is None:
+                raise ValueError(f"Injection profile {profile_name} requires target concentration")
             if profile.cycle_seconds <= 0:
                 raise ValueError(f"Injection profile {profile_name} has invalid cycle duration")
 
@@ -100,7 +128,7 @@ class JsonStandConfigStorage:
             schema_version=int(payload.get("schema_version", CONFIG_SCHEMA_VERSION)),
             pressure=PressureConfig(**payload.get("pressure", {})),
             injection_profiles={
-                name: InjectionProfile(**profile_payload)
+                name: _load_injection_profile(name, profile_payload)
                 for name, profile_payload in payload.get("injection_profiles", {}).items()
             }
             or {"default": InjectionProfile()},
@@ -108,6 +136,18 @@ class JsonStandConfigStorage:
         )
         config.validate()
         return config
+
+
+def _load_injection_profile(name: str, payload: dict[str, object]) -> InjectionProfile:
+    migrated = dict(payload)
+    if "duration_seconds" in migrated and "on_duration_seconds" not in migrated:
+        migrated["on_duration_seconds"] = migrated.pop("duration_seconds")
+    if "interval_seconds" in migrated and "off_duration_seconds" not in migrated:
+        migrated["off_duration_seconds"] = migrated.pop("interval_seconds")
+    if "count" in migrated and "cycles" not in migrated:
+        migrated["cycles"] = migrated.pop("count")
+    migrated.setdefault("name", name)
+    return InjectionProfile(**migrated)
 
     def save(self, config: StandConfig) -> StandConfig:
         config.validate()

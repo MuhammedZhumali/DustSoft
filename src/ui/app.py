@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -19,6 +20,7 @@ class DustSoftUI:
         self.root.geometry("1280x820")
         self.root.minsize(1040, 700)
         self._refresh_job: str | None = None
+        self._interval_thread: threading.Thread | None = None
 
         hardware = self.app.hardware_config or HardwareConfig()
 
@@ -63,7 +65,13 @@ class DustSoftUI:
         self.injection_interval_var = tk.StringVar(
             value=str(self.app.injection_settings.interval_seconds)
         )
-        self.injection_count_var = tk.StringVar(value=str(self.app.injection_settings.count))
+        self.injection_count_var = tk.StringVar(
+            value=(
+                ""
+                if self.app.injection_settings.cycles is None
+                else str(self.app.injection_settings.count)
+            )
+        )
         self.injection_cycle_var = tk.StringVar(
             value=str(self.app.injection_settings.cycle_seconds)
         )
@@ -148,6 +156,14 @@ class DustSoftUI:
                     self.app.manual_injection,
                     "Команда подачи пыли выполнена",
                 ),
+            ),
+            (
+                "Старт интервальной подачи",
+                self._start_interval_injection,
+            ),
+            (
+                "Стоп интервальной подачи",
+                self._stop_interval_injection,
             ),
             (
                 "Сброс аварии",
@@ -433,11 +449,63 @@ class DustSoftUI:
         finally:
             self._refresh_all()
 
+    def _start_interval_injection(self) -> None:
+        if self._interval_thread is not None and self._interval_thread.is_alive():
+            self.status_var.set("Интервальная подача уже выполняется")
+            return
+
+        try:
+            self._save_injection_settings()
+            self.app.start()
+        except Exception as exc:
+            self.status_var.set(f"Ошибка: {exc}")
+            messagebox.showerror("DustSoft", str(exc), parent=self.root)
+            self._refresh_all()
+            return
+
+        self.status_var.set("Интервальная подача запущена")
+        self._interval_thread = threading.Thread(
+            target=self._run_interval_injection_worker,
+            daemon=True,
+        )
+        self._interval_thread.start()
+        self._refresh_all()
+
+    def _run_interval_injection_worker(self) -> None:
+        try:
+            result = self.app.run_interval_injection()
+        except Exception as exc:
+            self.root.after(0, lambda: self._finish_interval_injection(error=exc))
+            return
+
+        self.root.after(0, lambda: self._finish_interval_injection(result=result))
+
+    def _finish_interval_injection(self, *, result=None, error: Exception | None = None) -> None:
+        if error is not None:
+            self.status_var.set(f"Ошибка интервальной подачи: {error}")
+            messagebox.showerror("DustSoft", str(error), parent=self.root)
+        elif result is not None and result.interrupted:
+            self.status_var.set(f"Интервальная подача прервана: циклов {result.completed_cycles}")
+        elif result is not None:
+            self.status_var.set(f"Интервальная подача завершена: циклов {result.completed_cycles}")
+        self._refresh_all()
+
+    def _stop_interval_injection(self) -> None:
+        try:
+            self.app.interrupt_interval_injection("ui_stop_interval")
+        except Exception as exc:
+            self.status_var.set(f"Ошибка: {exc}")
+            messagebox.showerror("DustSoft", str(exc), parent=self.root)
+        else:
+            self.status_var.set("Запрошена остановка интервальной подачи")
+        finally:
+            self._refresh_all()
+
     def _save_injection_settings(self) -> None:
         self.app.configure_injection(
             duration_seconds=float(self.injection_duration_var.get()),
             interval_seconds=float(self.injection_interval_var.get()),
-            count=int(self.injection_count_var.get()),
+            count=self._parse_optional_count(self.injection_count_var.get()),
             cycle_seconds=float(self.injection_cycle_var.get()),
         )
         user_parameters = self._parse_user_parameters(self.user_parameters_var.get())
@@ -524,6 +592,13 @@ class DustSoftUI:
             key, value = entry.split("=", 1)
             result[key.strip()] = value.strip()
         return result
+
+    @staticmethod
+    def _parse_optional_count(raw_value: str) -> int | None:
+        value = raw_value.strip()
+        if not value:
+            return None
+        return int(value)
 
     def _refresh_all(self) -> None:
         if self._refresh_job is not None:

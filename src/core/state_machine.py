@@ -13,10 +13,13 @@ class AppState(str, Enum):
     IDLE = "IDLE"
     READY = "READY"
     RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
     INJECTION = "INJECTION"
     STOPPED = "STOPPED"
     EMERGENCY = "EMERGENCY"
+    ERROR = "ERROR"
     FAULT = "FAULT"
+    FINISHED = "FINISHED"
 
 
 class Operation(str, Enum):
@@ -33,11 +36,28 @@ class Operation(str, Enum):
 ALLOWED_TRANSITIONS: dict[AppState, set[AppState]] = {
     AppState.IDLE: {AppState.READY, AppState.RUNNING, AppState.EMERGENCY, AppState.FAULT},
     AppState.READY: {AppState.RUNNING, AppState.STOPPED, AppState.EMERGENCY, AppState.FAULT},
-    AppState.RUNNING: {AppState.INJECTION, AppState.STOPPED, AppState.EMERGENCY, AppState.FAULT},
-    AppState.INJECTION: {AppState.RUNNING, AppState.STOPPED, AppState.EMERGENCY, AppState.FAULT},
+    AppState.RUNNING: {
+        AppState.PAUSED,
+        AppState.INJECTION,
+        AppState.STOPPED,
+        AppState.EMERGENCY,
+        AppState.ERROR,
+        AppState.FAULT,
+        AppState.FINISHED,
+    },
+    AppState.PAUSED: {AppState.RUNNING, AppState.STOPPED, AppState.EMERGENCY, AppState.ERROR},
+    AppState.INJECTION: {
+        AppState.RUNNING,
+        AppState.STOPPED,
+        AppState.EMERGENCY,
+        AppState.ERROR,
+        AppState.FAULT,
+    },
     AppState.STOPPED: {AppState.READY, AppState.RUNNING, AppState.EMERGENCY, AppState.FAULT},
     AppState.EMERGENCY: {AppState.STOPPED},
+    AppState.ERROR: {AppState.STOPPED, AppState.EMERGENCY},
     AppState.FAULT: {AppState.STOPPED, AppState.EMERGENCY},
+    AppState.FINISHED: {AppState.READY, AppState.RUNNING, AppState.STOPPED, AppState.EMERGENCY},
 }
 
 COMMAND_TRANSITIONS: dict[Operation, dict[AppState, AppState]] = {
@@ -45,13 +65,17 @@ COMMAND_TRANSITIONS: dict[Operation, dict[AppState, AppState]] = {
         AppState.IDLE: AppState.RUNNING,
         AppState.READY: AppState.RUNNING,
         AppState.STOPPED: AppState.RUNNING,
+        AppState.FINISHED: AppState.RUNNING,
     },
     Operation.STOP: {
         AppState.IDLE: AppState.STOPPED,
         AppState.READY: AppState.STOPPED,
         AppState.RUNNING: AppState.STOPPED,
+        AppState.PAUSED: AppState.STOPPED,
         AppState.INJECTION: AppState.STOPPED,
+        AppState.ERROR: AppState.STOPPED,
         AppState.FAULT: AppState.STOPPED,
+        AppState.FINISHED: AppState.STOPPED,
     },
     Operation.MANUAL_INJECTION: {
         AppState.RUNNING: AppState.INJECTION,
@@ -63,10 +87,13 @@ COMMAND_TRANSITIONS: dict[Operation, dict[AppState, AppState]] = {
         AppState.IDLE: AppState.EMERGENCY,
         AppState.READY: AppState.EMERGENCY,
         AppState.RUNNING: AppState.EMERGENCY,
+        AppState.PAUSED: AppState.EMERGENCY,
         AppState.INJECTION: AppState.EMERGENCY,
         AppState.STOPPED: AppState.EMERGENCY,
         AppState.EMERGENCY: AppState.EMERGENCY,
+        AppState.ERROR: AppState.EMERGENCY,
         AppState.FAULT: AppState.EMERGENCY,
+        AppState.FINISHED: AppState.EMERGENCY,
     },
     Operation.RESET_EMERGENCY: {
         AppState.EMERGENCY: AppState.STOPPED,

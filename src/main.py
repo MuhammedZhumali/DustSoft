@@ -7,12 +7,13 @@ from pathlib import Path
 
 from core.application import Application
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
-from devices.mocks import MockActuator, MockPressureSensor, MockReferenceMeter
+from devices.mocks import MockActuator, MockEmergencyButton, MockPressureSensor, MockReferenceMeter
 from devices.raspberry_pi import (
     GpioDiagnosticService,
     MemoryGpioBackend,
     RPiGpioBackend,
     RaspberryPiActuator,
+    RaspberryPiEmergencyButton,
 )
 from ui import launch_ui
 
@@ -32,7 +33,9 @@ def _build_devices(config: HardwareConfig):
             "compressor": RaspberryPiActuator(config.compressor_enable, backend),
             "valve": RaspberryPiActuator(config.injection_valve, backend),
             "pressure_sensor": MockPressureSensor(),
+            "pressure_low_sensor": MockPressureSensor([0.2]),
             "reference_meter": MockReferenceMeter(),
+            "emergency_button": RaspberryPiEmergencyButton(config.emergency_input, backend),
             "gpio_backend": backend,
         }
 
@@ -40,7 +43,9 @@ def _build_devices(config: HardwareConfig):
         "compressor": MockActuator(),
         "valve": MockActuator(),
         "pressure_sensor": MockPressureSensor(),
+        "pressure_low_sensor": MockPressureSensor([0.2]),
         "reference_meter": MockReferenceMeter(),
+        "emergency_button": MockEmergencyButton(),
         "gpio_backend": MemoryGpioBackend(),
     }
 
@@ -59,7 +64,9 @@ def build_app(config_path: Path | None = None) -> Application:
         compressor=devices["compressor"],
         valve=devices["valve"],
         pressure_sensor=devices["pressure_sensor"],
+        pressure_low_sensor=devices["pressure_low_sensor"],
         reference_meter=devices["reference_meter"],
+        emergency_button=devices["emergency_button"],
         data_dir=Path("data"),
         hardware_config=config,
         hardware_config_path=config_path,

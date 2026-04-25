@@ -5,6 +5,10 @@ Current scope matches the simplified software requirements from the technical sp
 
 - local operator GUI with main, injection settings, pressure settings, journal, and system info screens;
 - manual dust injection, start, stop, and emergency stop commands;
+- interval dust injection with fixed cycles or DustTrak target concentration control;
+- dual pressure telemetry fields for D1 high pressure and D2 low pressure;
+- DustTrak II Ethernet/HTTP text-frame adapters for reference concentration readings;
+- CSV measurement archives under `data/measurements/`;
 - persistent settings recovery after restart;
 - structured event, alarm, and technical journals;
 - remote monitoring and remote emergency stop over a protected channel;
@@ -45,6 +49,7 @@ Run local checks without real hardware:
 - Optional hardware mapping can be provided in `data/hardware.json`.
 - Stand configuration is stored in `data/config.json` and validated on startup.
 - Journals are stored in `data/events.log.jsonl`, `data/alarms.log.jsonl`, and `data/technical.log.jsonl`.
+- Measurement archives are stored in `data/measurements/<test_id>.csv`.
 - Daily log history is stored in `data/history/<journal-name>/YYYY-MM-DD.jsonl`.
 - Exported log bundles are stored in `data/exports/`.
 - After restart, the application restores saved injection settings, pressure limits, and user parameters during bootstrap.

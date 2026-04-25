@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import GpioOutputConfig
+from .config import GpioInputConfig, GpioOutputConfig
 
 
 class GpioBackendError(RuntimeError):
@@ -118,6 +118,21 @@ class RaspberryPiActuator:
             self.stop()
             return
         self.start()
+
+
+@dataclass
+class RaspberryPiEmergencyButton:
+    """GPIO input for emergency stop button."""
+
+    config: GpioInputConfig
+    backend: GpioBackend
+    is_connected: bool = True
+
+    def __post_init__(self) -> None:
+        self.backend.setup_input(self.config.pin_bcm, pull=self.config.pull)
+
+    def is_pressed(self) -> bool:
+        return self.backend.read(self.config.pin_bcm) == self.config.active_level
 
 
 class GpioDiagnosticService:
