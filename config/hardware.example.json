@@ -2,22 +2,44 @@
   "schema_version": 1,
   "mode": "mock",
   "dry_run": true,
-  "notes": "Temporary pin mapping; verify against real hardware before live operation.",
+  "notes": "Raspberry Pi GPIO controls external control-board lines only through relays/drivers. Relay defaults use active LOW logic: GPIO LOW = ON, GPIO HIGH = safe OFF.",
   "gpio": {
     "compressor_enable": {
       "pin_bcm": 17,
-      "active_level": 1,
-      "safe_level": 0
+      "active_level": 0,
+      "safe_level": 1
     },
     "injection_valve": {
       "pin_bcm": 27,
-      "active_level": 1,
-      "safe_level": 0
+      "active_level": 0,
+      "safe_level": 1
     },
     "emergency_input": {
       "pin_bcm": 22,
       "active_level": 0,
       "pull": "up"
     }
+  },
+  "pressure_inputs": {
+    "mode": "mock",
+    "high_channel": 0,
+    "low_channel": 1,
+    "signal": "voltage_0_5",
+    "high_min_bar": 0.0,
+    "high_max_bar": 1.5,
+    "low_min_bar": 0.0,
+    "low_max_bar": 0.5
+  },
+  "reference_meter": {
+    "mode": "dusttrak_ethernet",
+    "host": "192.168.1.50",
+    "port": 3602,
+    "command": "READ",
+    "url": "http://192.168.1.50/",
+    "timeout_seconds": 2.0,
+    "analog_channel": 0,
+    "analog_signal": "voltage_0_5",
+    "analog_min_value": 0.0,
+    "analog_max_value": 100.0
   }
 }

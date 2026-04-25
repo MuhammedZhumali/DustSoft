@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import socket
 from dataclasses import dataclass
+from typing import Literal
 from urllib.request import urlopen
 
 
@@ -68,3 +69,31 @@ class DustTrakHttpClient:
 
         self.is_connected = True
         return parse_concentration(payload)
+
+
+@dataclass
+class DustTrakAnalogClient:
+    """DustTrak analog output reader through an ADC/current converter."""
+
+    analog_input: object
+    channel: int = 0
+    signal: Literal["voltage_0_5", "current_4_20"] = "voltage_0_5"
+    min_value: float = 0.0
+    max_value: float = 100.0
+    is_connected: bool = True
+
+    def read_reference_value(self) -> float:
+        try:
+            if self.signal == "current_4_20":
+                raw = float(self.analog_input.read_current_ma(self.channel))
+                fraction = (raw - 4.0) / 16.0
+            else:
+                raw = float(self.analog_input.read_voltage(self.channel))
+                fraction = raw / 5.0
+        except Exception as exc:
+            self.is_connected = False
+            raise DustTrakCommunicationError(str(exc)) from exc
+
+        self.is_connected = True
+        fraction = max(0.0, min(fraction, 1.0))
+        return self.min_value + fraction * (self.max_value - self.min_value)

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .ports import ActuatorPort, EmergencyButtonPort, PressureSensorPort, ReferenceMeterPort
+from .ports import (
+    ActuatorPort,
+    AnalogInputPort,
+    EmergencyButtonPort,
+    PressureSensorPort,
+    ReferenceMeterPort,
+)
 
 
 @dataclass
@@ -77,3 +83,16 @@ class MockEmergencyButton(EmergencyButtonPort):
 
     def is_pressed(self) -> bool:
         return self.pressed
+
+
+@dataclass
+class MockAnalogInput(AnalogInputPort):
+    voltage: float = 0.0
+    current_ma: float = 4.0
+    is_connected: bool = True
+
+    def read_voltage(self, channel: int) -> float:
+        return self.voltage
+
+    def read_current_ma(self, channel: int) -> float:
+        return self.current_ma

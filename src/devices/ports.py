@@ -32,6 +32,18 @@ class PressureSensorPort(Protocol):
         """Return current pressure value in bar."""
 
 
+class AnalogInputPort(Protocol):
+    """Read an analog input converted by an ADC or industrial transmitter."""
+
+    is_connected: bool
+
+    def read_voltage(self, channel: int) -> float:
+        """Return channel voltage in volts."""
+
+    def read_current_ma(self, channel: int) -> float:
+        """Return channel current in milliamps."""
+
+
 class DualPressureSensorPort(Protocol):
     """Read both chamber pressure channels in bar."""
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -94,6 +95,9 @@ class Application:
         self.measurement_archive = CsvMeasurementArchive(self.data_dir / "measurements")
         self.current_test_id = uuid4().hex
         self.interval_stop_requested = False
+        self.reference_poll_interval_seconds = 5.0
+        self._last_reference_read_at = -self.reference_poll_interval_seconds
+        self._last_reference_value: float | None = None
         self.user_parameters = dict(self.settings.user_parameters)
         self.remote_service = RemoteService(self, access_policy=self.remote_access_policy)
         self.cycle_service = TechnologyCycleService(self)
@@ -131,7 +135,8 @@ class Application:
         """Run one cycle of application logic for smoke testing."""
         self.start()
         self.manual_injection()
-        reference = self.reference_meter.read_reference_value()
+        telemetry = self.read_telemetry()
+        reference = telemetry.get("reference")
         self.archive_measurement()
         self.stop()
 
@@ -288,7 +293,7 @@ class Application:
     def read_telemetry(self) -> dict[str, Any]:
         pressure = self.controller.last_pressure
         pressure_low = self.controller.last_pressure_low
-        reference = None
+        reference = self._last_reference_value
 
         try:
             pressure = self.pressure_sensor.read_pressure()
@@ -305,14 +310,7 @@ class Application:
 
         self._evaluate_emergency_inputs(pressure, pressure_low)
 
-        try:
-            reference = self.reference_meter.read_reference_value()
-        except Exception as exc:
-            self.journal.log_technical(
-                event_type="reference_read_failed",
-                description=f"Не удалось прочитать эталонный прибор: {exc}",
-                system_snapshot=self.snapshot_state(),
-            )
+        reference = self._read_reference_if_due()
 
         snapshot = self.snapshot_state()
         snapshot["pressure"] = pressure
@@ -321,6 +319,19 @@ class Application:
         snapshot["reference"] = reference
         snapshot["dust_concentration"] = reference
         return snapshot
+
+    def _read_reference_if_due(self) -> float | None:
+        now = monotonic()
+        elapsed = now - self._last_reference_read_at
+        if elapsed < self.reference_poll_interval_seconds:
+            return self._last_reference_value
+
+        self._last_reference_read_at = now
+        try:
+            self._last_reference_value = self.reference_meter.read_reference_value()
+        except Exception:
+            return self._last_reference_value
+        return self._last_reference_value
 
     def run_interval_injection(self) -> InjectionRunResult:
         self.interval_stop_requested = False

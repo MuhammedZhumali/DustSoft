@@ -7,7 +7,13 @@ from pathlib import Path
 
 from core.application import Application
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
-from devices.mocks import MockActuator, MockEmergencyButton, MockPressureSensor, MockReferenceMeter
+from devices.mocks import (
+    MockActuator,
+    MockAnalogInput,
+    MockEmergencyButton,
+    MockPressureSensor,
+    MockReferenceMeter,
+)
 from devices.raspberry_pi import (
     GpioDiagnosticService,
     MemoryGpioBackend,
@@ -15,7 +21,40 @@ from devices.raspberry_pi import (
     RaspberryPiActuator,
     RaspberryPiEmergencyButton,
 )
+from reference_meter.dusttrak import (
+    DustTrakAnalogClient,
+    DustTrakEthernetClient,
+    DustTrakHttpClient,
+)
 from ui import launch_ui
+
+
+def _build_reference_meter(config: HardwareConfig):
+    meter = config.reference_meter
+    if meter.mode == "dusttrak_ethernet":
+        command = meter.command.encode("ascii", errors="ignore")
+        if not command.endswith(b"\n"):
+            command += b"\n"
+        return DustTrakEthernetClient(
+            host=meter.host,
+            port=meter.port,
+            command=command,
+            timeout_seconds=meter.timeout_seconds,
+        )
+    if meter.mode == "dusttrak_http":
+        return DustTrakHttpClient(
+            url=meter.url,
+            timeout_seconds=meter.timeout_seconds,
+        )
+    if meter.mode == "dusttrak_analog":
+        return DustTrakAnalogClient(
+            analog_input=MockAnalogInput(),
+            channel=meter.analog_channel,
+            signal=meter.analog_signal,
+            min_value=meter.analog_min_value,
+            max_value=meter.analog_max_value,
+        )
+    return MockReferenceMeter()
 
 
 def _build_devices(config: HardwareConfig):
@@ -34,7 +73,7 @@ def _build_devices(config: HardwareConfig):
             "valve": RaspberryPiActuator(config.injection_valve, backend),
             "pressure_sensor": MockPressureSensor(),
             "pressure_low_sensor": MockPressureSensor([0.2]),
-            "reference_meter": MockReferenceMeter(),
+            "reference_meter": _build_reference_meter(config),
             "emergency_button": RaspberryPiEmergencyButton(config.emergency_input, backend),
             "gpio_backend": backend,
         }

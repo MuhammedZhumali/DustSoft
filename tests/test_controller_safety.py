@@ -10,7 +10,7 @@ from core.config_model import InjectionProfile, JsonStandConfigStorage, StandCon
 from core.cycle import CycleStage, PulsePlanner
 from core.errors import DeviceProtocolError
 from core.service_api import ApplicationApi
-from reference_meter.dusttrak import parse_concentration
+from reference_meter.dusttrak import DustTrakAnalogClient, parse_concentration
 from services.injection_scheduler import InjectionSchedulerError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -19,7 +19,13 @@ from core.application import Application
 from core.controller import Controller
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from core.state_machine import AppState, StateTransitionError
-from devices.mocks import MockActuator, MockEmergencyButton, MockPressureSensor, MockReferenceMeter
+from devices.mocks import (
+    MockActuator,
+    MockAnalogInput,
+    MockEmergencyButton,
+    MockPressureSensor,
+    MockReferenceMeter,
+)
 from devices.raspberry_pi import GpioDiagnosticService, MemoryGpioBackend
 from remote import RemoteAccessPolicy, RemoteRequestContext, RemoteSecurityError
 from safety.interlock import InterlockError
@@ -180,6 +186,61 @@ class ApplicationInfrastructureTests(unittest.TestCase):
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
+    def test_reference_meter_is_polled_no_more_than_configured_interval(self) -> None:
+        class CountingReferenceMeter(MockReferenceMeter):
+            reads = 0
+
+            def read_reference_value(self) -> float:
+                self.reads += 1
+                return super().read_reference_value()
+
+        data_dir = self.make_data_dir()
+        try:
+            reference_meter = CountingReferenceMeter()
+            app = Application(
+                compressor=MockActuator(),
+                valve=MockActuator(),
+                pressure_sensor=MockPressureSensor([1.0]),
+                reference_meter=reference_meter,
+                data_dir=data_dir,
+            )
+            app.bootstrap()
+
+            first = app.read_telemetry()
+            second = app.read_telemetry()
+
+            self.assertEqual(first["reference"], 1.0)
+            self.assertEqual(second["reference"], 1.0)
+            self.assertEqual(reference_meter.reads, 1)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_reference_meter_failure_does_not_spam_technical_journal(self) -> None:
+        class BrokenReferenceMeter(MockReferenceMeter):
+            def read_reference_value(self) -> float:
+                raise RuntimeError("offline")
+
+        data_dir = self.make_data_dir()
+        try:
+            app = Application(
+                compressor=MockActuator(),
+                valve=MockActuator(),
+                pressure_sensor=MockPressureSensor([1.0]),
+                reference_meter=BrokenReferenceMeter(),
+                data_dir=data_dir,
+            )
+            app.bootstrap()
+
+            telemetry = app.read_telemetry()
+            technical_events = [
+                entry.event_type for entry in app.journal.technical_journal.read_all()
+            ]
+
+            self.assertIsNone(telemetry["reference"])
+            self.assertNotIn("reference_read_failed", technical_events)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
     def test_remote_service_requires_secure_channel_and_logs_actions(self) -> None:
         data_dir = self.make_data_dir()
         try:
@@ -285,8 +346,20 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             self.assertEqual(config.compressor_enable.pin_bcm, 17)
             self.assertEqual(config.injection_valve.pin_bcm, 27)
             self.assertEqual(config.emergency_input.pin_bcm, 22)
+            self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
+            self.assertEqual(config.pressure_inputs.high_channel, 0)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_hardware_defaults_use_active_low_safe_relay_levels(self) -> None:
+        config = HardwareConfig()
+
+        self.assertEqual(config.compressor_enable.active_level, 0)
+        self.assertEqual(config.compressor_enable.safe_level, 1)
+        self.assertEqual(config.injection_valve.active_level, 0)
+        self.assertEqual(config.injection_valve.safe_level, 1)
+        self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
+        self.assertEqual(config.pressure_inputs.mode, "mock")
 
     def test_hardware_config_persists_personal_mapping(self) -> None:
         data_dir = self.make_data_dir()
@@ -427,6 +500,17 @@ class ApplicationInfrastructureTests(unittest.TestCase):
 
     def test_dusttrak_parser_extracts_concentration(self) -> None:
         self.assertEqual(parse_concentration("DustTrak,PM,0.123"), 0.123)
+
+    def test_dusttrak_analog_client_scales_voltage(self) -> None:
+        client = DustTrakAnalogClient(
+            analog_input=MockAnalogInput(voltage=2.5),
+            channel=0,
+            signal="voltage_0_5",
+            min_value=0.0,
+            max_value=100.0,
+        )
+
+        self.assertEqual(client.read_reference_value(), 50.0)
 
 
 if __name__ == "__main__":

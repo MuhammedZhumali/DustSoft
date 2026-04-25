@@ -214,8 +214,8 @@ class DustSoftUI:
         ttk.Label(
             hint_frame,
             text=(
-                "Интерфейс обновляет давление, состояние исполнительных устройств и "
-                "показания эталонного прибора автоматически раз в секунду."
+                "Интерфейс обновляет давление и состояние исполнительных устройств раз в секунду; "
+                "показания эталонного прибора обновляются раз в 5 секунд."
             ),
             wraplength=900,
             justify="left",
@@ -229,7 +229,7 @@ class DustSoftUI:
 
         fields = [
             ("Время впрыска, с", self.injection_duration_var),
-            ("Интервал между впрысками, с", self.injection_interval_var),
+            ("Пауза между впрысками, с", self.injection_interval_var),
             ("Количество впрысков", self.injection_count_var),
             ("Длительность цикла, с", self.injection_cycle_var),
             ("Пользовательские параметры", self.user_parameters_var),

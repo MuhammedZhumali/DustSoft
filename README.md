@@ -56,6 +56,20 @@ Run local checks without real hardware:
 
 To prepare a Raspberry Pi mapping, copy [config/hardware.example.json](/c:/Users/Muhalek/DustSoft/DustSoft/config/hardware.example.json:1) to `data/hardware.json` and edit the GPIO assignments.
 
+The Raspberry Pi GPIO pins do not drive the compressor, valve, or 220V circuits
+directly. They only command the external control-board inputs through relays or
+driver modules. The default mapping assumes inverted relay logic:
+`active_level=0` means GPIO LOW commands the external line ON, and `safe_level=1`
+means GPIO HIGH keeps the external line OFF at startup. If your relay or driver
+is active HIGH, set `active_level=1` and `safe_level=0` for that channel.
+
+In `raspberry_pi` mode the reference meter is built from `reference_meter` in
+`data/hardware.json`. Supported modes are `dusttrak_ethernet`, `dusttrak_http`,
+`dusttrak_analog`, and `mock`. The default is a DustTrak Ethernet text-frame
+client at `192.168.1.50:3602` with command `READ`; change these values to match
+the actual DustTrak connection before live use. Analog mode expects an ADC or
+4-20 mA converter behind the configured channel.
+
 The application also exposes an internal service API for UI and future remote transports. This API is not necessarily a network API; it is a shared command/query layer used by GUI, orchestration, and integration code.
 
 ## Raspberry Pi Autostart
