@@ -54,8 +54,6 @@ class Application:
     remote_access_policy: RemoteAccessPolicy = field(default_factory=RemoteAccessPolicy)
     hardware_config: HardwareConfig | None = None
     hardware_config_path: Path | None = None
-    gpio_backend: object | None = None
-    gpio_diagnostics: object | None = None
 
     def __post_init__(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

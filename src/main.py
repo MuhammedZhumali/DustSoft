@@ -6,21 +6,16 @@ import argparse
 from pathlib import Path
 
 from core.application import Application
+from devices.arduino import (
+    ArduinoAnalogPressureSensor,
+    ArduinoAnalogTransport,
+)
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from devices.mocks import (
-    MockActuator,
     MockAnalogInput,
     MockEmergencyButton,
-    MockPressureSensor,
-    MockReferenceMeter,
 )
-from devices.raspberry_pi import (
-    GpioDiagnosticService,
-    MemoryGpioBackend,
-    RPiGpioBackend,
-    RaspberryPiActuator,
-    RaspberryPiEmergencyButton,
-)
+from devices.raspberry_pi import RaspberryPiRelayActuator
 from reference_meter.dusttrak import (
     DustTrakAnalogClient,
     DustTrakEthernetClient,
@@ -54,45 +49,40 @@ def _build_reference_meter(config: HardwareConfig):
             min_value=meter.analog_min_value,
             max_value=meter.analog_max_value,
         )
-    return MockReferenceMeter()
+    raise ValueError(f"Unsupported reference meter mode: {meter.mode}")
 
 
 def _build_devices(config: HardwareConfig):
-    backend = None
-    if config.mode == "raspberry_pi":
-        if config.dry_run:
-            backend = MemoryGpioBackend()
-        else:
-            try:
-                backend = RPiGpioBackend()
-            except Exception:
-                backend = MemoryGpioBackend()
-
-        return {
-            "compressor": RaspberryPiActuator(config.compressor_enable, backend),
-            "valve": RaspberryPiActuator(config.injection_valve, backend),
-            "pressure_sensor": MockPressureSensor(),
-            "pressure_low_sensor": MockPressureSensor([0.2]),
-            "reference_meter": _build_reference_meter(config),
-            "emergency_button": RaspberryPiEmergencyButton(config.emergency_input, backend),
-            "gpio_backend": backend,
-        }
-
+    arduino = config.arduino_serial
+    analog_transport = ArduinoAnalogTransport(arduino)
     return {
-        "compressor": MockActuator(),
-        "valve": MockActuator(),
-        "pressure_sensor": MockPressureSensor(),
-        "pressure_low_sensor": MockPressureSensor([0.2]),
-        "reference_meter": MockReferenceMeter(),
+        "compressor": RaspberryPiRelayActuator(
+            config.relay_outputs.compressor,
+        ),
+        "valve": RaspberryPiRelayActuator(
+            config.relay_outputs.valve,
+        ),
+        "pressure_sensor": ArduinoAnalogPressureSensor(
+            analog_transport,
+            arduino.main_channel,
+            config.pressure_inputs,
+            kind="high",
+        ),
+        "pressure_low_sensor": ArduinoAnalogPressureSensor(
+            analog_transport,
+            arduino.second_channel,
+            config.pressure_inputs,
+            kind="low",
+        ),
+        "reference_meter": _build_reference_meter(config),
         "emergency_button": MockEmergencyButton(),
-        "gpio_backend": MemoryGpioBackend(),
     }
 
 
 def build_app(config_path: Path | None = None) -> Application:
     """Initialize application dependencies.
 
-    Uses mock adapters by default so the app can run without real hardware.
+    Uses Raspberry Pi GPIO relays for outputs and Arduino USB serial for analog inputs.
     """
     config_path = config_path or Path("data") / "hardware.json"
     if not config_path.exists():
@@ -109,13 +99,11 @@ def build_app(config_path: Path | None = None) -> Application:
         data_dir=Path("data"),
         hardware_config=config,
         hardware_config_path=config_path,
-        gpio_backend=devices["gpio_backend"],
-        gpio_diagnostics=GpioDiagnosticService(devices["gpio_backend"]),
     )
 
 
 def run() -> None:
-    """Start the application with mock dependencies."""
+    """Start the application with Raspberry Pi GPIO and Arduino analog telemetry."""
     app = build_app()
     app.bootstrap()
     result = app.run_once()
@@ -123,7 +111,7 @@ def run() -> None:
 
 
 def run_gui() -> None:
-    """Start the operator GUI with mock dependencies."""
+    """Start the operator GUI with Raspberry Pi GPIO and Arduino analog telemetry."""
     app = build_app()
     app.bootstrap()
     launch_ui(app)

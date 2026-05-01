@@ -1,116 +1,46 @@
-"""Raspberry Pi hardware adapters driven by configurable GPIO pins."""
+"""Raspberry Pi GPIO relay adapters."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import GpioInputConfig, GpioOutputConfig
+from .config import RelayOutputConfig
 
 
-class GpioBackendError(RuntimeError):
+class RaspberryPiGpioError(RuntimeError):
     """Raised when Raspberry Pi GPIO support is unavailable."""
 
 
-class GpioBackend:
-    """Best-effort GPIO backend that prefers RPi.GPIO when available."""
-
-    OUT = "out"
-    IN = "in"
-    PUD_UP = "up"
-    PUD_DOWN = "down"
-
-    def setup_output(self, pin_bcm: int, *, initial: int) -> None:
-        raise NotImplementedError
-
-    def setup_input(self, pin_bcm: int, *, pull: str) -> None:
-        raise NotImplementedError
-
-    def write(self, pin_bcm: int, level: int) -> None:
-        raise NotImplementedError
-
-    def read(self, pin_bcm: int) -> int:
-        raise NotImplementedError
-
-    def cleanup(self) -> None:
-        """Release resources if backend needs it."""
-
-    def snapshot_levels(self) -> dict[int, int]:
-        """Return known GPIO levels when backend supports introspection."""
-        return {}
-
-
-class MemoryGpioBackend(GpioBackend):
-    """In-memory backend useful for development and dry runs."""
-
-    def __init__(self) -> None:
-        self.levels: dict[int, int] = {}
-
-    def setup_output(self, pin_bcm: int, *, initial: int) -> None:
-        self.levels[pin_bcm] = initial
-
-    def setup_input(self, pin_bcm: int, *, pull: str) -> None:
-        self.levels.setdefault(pin_bcm, 1 if pull == self.PUD_UP else 0)
-
-    def write(self, pin_bcm: int, level: int) -> None:
-        self.levels[pin_bcm] = level
-
-    def read(self, pin_bcm: int) -> int:
-        return self.levels.get(pin_bcm, 0)
-
-    def snapshot_levels(self) -> dict[int, int]:
-        return dict(self.levels)
-
-
-class RPiGpioBackend(GpioBackend):
-    """RPi.GPIO wrapper created only when library is available."""
-
-    def __init__(self) -> None:
-        try:
-            import RPi.GPIO as gpio  # type: ignore[import-not-found]
-        except ImportError as exc:
-            raise GpioBackendError(
-                "RPi.GPIO is not installed; use mock mode or install GPIO support on Raspberry Pi"
-            ) from exc
-
-        self.gpio = gpio
-        self.gpio.setmode(self.gpio.BCM)
-        self.gpio.setwarnings(False)
-
-    def setup_output(self, pin_bcm: int, *, initial: int) -> None:
-        self.gpio.setup(pin_bcm, self.gpio.OUT, initial=initial)
-
-    def setup_input(self, pin_bcm: int, *, pull: str) -> None:
-        pull_mode = self.gpio.PUD_UP if pull == self.PUD_UP else self.gpio.PUD_DOWN
-        self.gpio.setup(pin_bcm, self.gpio.IN, pull_up_down=pull_mode)
-
-    def write(self, pin_bcm: int, level: int) -> None:
-        self.gpio.output(pin_bcm, level)
-
-    def read(self, pin_bcm: int) -> int:
-        return int(self.gpio.input(pin_bcm))
-
-    def cleanup(self) -> None:
-        self.gpio.cleanup()
-
-
 @dataclass
-class RaspberryPiActuator:
-    """GPIO-driven actuator with configurable active and safe levels."""
+class RaspberryPiRelayActuator:
+    """Relay output controlled by a Raspberry Pi BCM GPIO pin."""
 
-    config: GpioOutputConfig
-    backend: GpioBackend
+    config: RelayOutputConfig
     is_connected: bool = True
     is_running: bool = False
 
     def __post_init__(self) -> None:
-        self.backend.setup_output(self.config.pin_bcm, initial=self.config.safe_level)
+        try:
+            from gpiozero import OutputDevice  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise RaspberryPiGpioError(
+                "gpiozero is not installed; install it with '.venv/bin/python -m pip install gpiozero lgpio'"
+            ) from exc
+
+        active_high = self.config.active_level == 1
+        initial_value = self.config.safe_level == self.config.active_level
+        self.device = OutputDevice(
+            self.config.pin_bcm,
+            active_high=active_high,
+            initial_value=initial_value,
+        )
 
     def start(self) -> None:
-        self.backend.write(self.config.pin_bcm, self.config.active_level)
+        self.device.on()
         self.is_running = True
 
     def stop(self) -> None:
-        self.backend.write(self.config.pin_bcm, self.config.safe_level)
+        self.device.off()
         self.is_running = False
 
     def set_power(self, value: float) -> None:
@@ -118,37 +48,3 @@ class RaspberryPiActuator:
             self.stop()
             return
         self.start()
-
-
-@dataclass
-class RaspberryPiEmergencyButton:
-    """GPIO input for emergency stop button."""
-
-    config: GpioInputConfig
-    backend: GpioBackend
-    is_connected: bool = True
-
-    def __post_init__(self) -> None:
-        self.backend.setup_input(self.config.pin_bcm, pull=self.config.pull)
-
-    def is_pressed(self) -> bool:
-        return self.backend.read(self.config.pin_bcm) == self.config.active_level
-
-
-class GpioDiagnosticService:
-    """Manual GPIO diagnostics that never invoke the process controller."""
-
-    def __init__(self, backend: GpioBackend) -> None:
-        self.backend = backend
-
-    def set_output_level(self, pin_bcm: int, level: int) -> int:
-        self.backend.setup_output(pin_bcm, initial=level)
-        self.backend.write(pin_bcm, level)
-        return self.backend.read(pin_bcm)
-
-    def read_input_level(self, pin_bcm: int, *, pull: str = GpioBackend.PUD_UP) -> int:
-        self.backend.setup_input(pin_bcm, pull=pull)
-        return self.backend.read(pin_bcm)
-
-    def snapshot(self) -> dict[int, int]:
-        return self.backend.snapshot_levels()

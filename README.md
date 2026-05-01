@@ -31,7 +31,7 @@ Start the operator GUI:
 Or run through the virtual environment directly:
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.main gui
+.\.venv\Scripts\python.exe src\main.py gui
 ```
 
 ## Tests
@@ -54,21 +54,35 @@ Run local checks without real hardware:
 - Exported log bundles are stored in `data/exports/`.
 - After restart, the application restores saved injection settings, pressure limits, and user parameters during bootstrap.
 
-To prepare a Raspberry Pi mapping, copy [config/hardware.example.json](/c:/Users/Muhalek/DustSoft/DustSoft/config/hardware.example.json:1) to `data/hardware.json` and edit the GPIO assignments.
+To prepare the hardware mapping, copy [config/hardware.example.json](/c:/Users/Muhalek/DustSoft/DustSoft/config/hardware.example.json:1) to `data/hardware.json`.
 
-The Raspberry Pi GPIO pins do not drive the compressor, valve, or 220V circuits
-directly. They only command the external control-board inputs through relays or
-driver modules. The default mapping assumes inverted relay logic:
-`active_level=0` means GPIO LOW commands the external line ON, and `safe_level=1`
-means GPIO HIGH keeps the external line OFF at startup. If your relay or driver
-is active HIGH, set `active_level=1` and `safe_level=0` for that channel.
+Raspberry Pi controls the relay board directly:
 
-In `raspberry_pi` mode the reference meter is built from `reference_meter` in
-`data/hardware.json`. Supported modes are `dusttrak_ethernet`, `dusttrak_http`,
-`dusttrak_analog`, and `mock`. The default is a DustTrak Ethernet text-frame
-client at `192.168.1.50:3602` with command `READ`; change these values to match
-the actual DustTrak connection before live use. Analog mode expects an ADC or
-4-20 mA converter behind the configured channel.
+- relay IN1 / compressor: BCM GPIO17;
+- relay IN2 / injection valve: BCM GPIO27 by default.
+
+Arduino is used only as an analog reader. It sends values for `A0` and `A4` over
+USB serial. Configure `arduino_serial.port` as `/dev/ttyACM0` or `/dev/ttyUSB0`.
+If your second relay is physically wired to BCM GPIO18 instead of BCM GPIO27,
+change `relay_outputs.valve.pin_bcm` in `data/hardware.json` from `27` to `18`.
+
+Standalone hardware smoke test:
+
+```bash
+ls /dev/ttyACM* /dev/ttyUSB*
+python3 -m pip install pyserial gpiozero lgpio
+python3 scripts/raspberry_relay_from_arduino.py --port /dev/ttyACM0 --threshold-a0 512
+```
+
+Use `--relay2-gpio 18` if relay IN2 is wired to BCM GPIO18. Add `--active-low`
+if the relay module turns on when the GPIO output is LOW.
+
+The reference meter is built from `reference_meter` in `data/hardware.json`.
+Supported modes are `dusttrak_ethernet`, `dusttrak_http`, and `dusttrak_analog`.
+The default is a DustTrak Ethernet text-frame client at
+`192.168.1.50:3602` with command `READ`; change these values to match the actual
+DustTrak connection before live use. Analog mode expects an ADC or 4-20 mA
+converter behind the configured channel.
 
 The application also exposes an internal service API for UI and future remote transports. This API is not necessarily a network API; it is a shared command/query layer used by GUI, orchestration, and integration code.
 

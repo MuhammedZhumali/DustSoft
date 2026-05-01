@@ -1,27 +1,27 @@
 {
   "schema_version": 1,
-  "mode": "mock",
-  "dry_run": true,
-  "notes": "Raspberry Pi GPIO controls external control-board lines only through relays/drivers. Relay defaults use active LOW logic: GPIO LOW = ON, GPIO HIGH = safe OFF.",
-  "gpio": {
-    "compressor_enable": {
+  "notes": "Raspberry Pi GPIO controls relays; Arduino sends analog sensor values over USB.",
+  "arduino_serial": {
+    "port": "/dev/ttyACM0",
+    "baudrate": 9600,
+    "timeout_seconds": 1.0,
+    "startup_delay_seconds": 2.0,
+    "main_channel": "A0",
+    "second_channel": "A4"
+  },
+  "relay_outputs": {
+    "compressor": {
       "pin_bcm": 17,
-      "active_level": 0,
-      "safe_level": 1
+      "active_level": 1,
+      "safe_level": 0
     },
-    "injection_valve": {
+    "valve": {
       "pin_bcm": 27,
-      "active_level": 0,
-      "safe_level": 1
-    },
-    "emergency_input": {
-      "pin_bcm": 22,
-      "active_level": 0,
-      "pull": "up"
+      "active_level": 1,
+      "safe_level": 0
     }
   },
   "pressure_inputs": {
-    "mode": "mock",
     "high_channel": 0,
     "low_channel": 1,
     "signal": "voltage_0_5",

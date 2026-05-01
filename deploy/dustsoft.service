@@ -8,7 +8,7 @@ Type=simple
 User=pi
 WorkingDirectory=/opt/dustsoft
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/dustsoft/.venv/bin/python -m src.main gui
+ExecStart=/opt/dustsoft/.venv/bin/python src/main.py gui
 Restart=always
 RestartSec=5
 

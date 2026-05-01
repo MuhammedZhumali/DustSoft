@@ -17,7 +17,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from core.application import Application
 from core.controller import Controller
-from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
+from devices.config import (
+    ArduinoSerialConfig,
+    HardwareConfig,
+    RelayOutputConfig,
+    RelayOutputsConfig,
+    load_hardware_config,
+    save_hardware_config,
+)
 from core.state_machine import AppState, StateTransitionError
 from devices.mocks import (
     MockActuator,
@@ -26,7 +33,6 @@ from devices.mocks import (
     MockPressureSensor,
     MockReferenceMeter,
 )
-from devices.raspberry_pi import GpioDiagnosticService, MemoryGpioBackend
 from remote import RemoteAccessPolicy, RemoteRequestContext, RemoteSecurityError
 from safety.interlock import InterlockError
 
@@ -318,7 +324,7 @@ class ApplicationInfrastructureTests(unittest.TestCase):
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
-    def test_hardware_config_loads_gpio_mapping(self) -> None:
+    def test_hardware_config_loads_arduino_mapping(self) -> None:
         data_dir = self.make_data_dir()
         try:
             config_path = data_dir / "hardware.json"
@@ -326,13 +332,16 @@ class ApplicationInfrastructureTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "mode": "raspberry_pi",
-                        "dry_run": True,
                         "notes": "temporary",
-                        "gpio": {
-                            "compressor_enable": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
-                            "injection_valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
-                            "emergency_input": {"pin_bcm": 22, "active_level": 0, "pull": "up"},
+                        "arduino_serial": {
+                            "port": "/dev/ttyUSB0",
+                            "baudrate": 115200,
+                            "main_channel": "A0",
+                            "second_channel": "A4",
+                        },
+                        "relay_outputs": {
+                            "compressor": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
+                            "valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
                         },
                     }
                 ),
@@ -341,49 +350,48 @@ class ApplicationInfrastructureTests(unittest.TestCase):
 
             config = load_hardware_config(config_path)
 
-            self.assertEqual(config.mode, "raspberry_pi")
-            self.assertEqual(config.dry_run, True)
-            self.assertEqual(config.compressor_enable.pin_bcm, 17)
-            self.assertEqual(config.injection_valve.pin_bcm, 27)
-            self.assertEqual(config.emergency_input.pin_bcm, 22)
+            self.assertEqual(config.arduino_serial.port, "/dev/ttyUSB0")
+            self.assertEqual(config.arduino_serial.baudrate, 115200)
+            self.assertEqual(config.arduino_serial.main_channel, "A0")
+            self.assertEqual(config.arduino_serial.second_channel, "A4")
+            self.assertEqual(config.relay_outputs.compressor.pin_bcm, 17)
+            self.assertEqual(config.relay_outputs.valve.pin_bcm, 27)
             self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
             self.assertEqual(config.pressure_inputs.high_channel, 0)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
-    def test_hardware_defaults_use_active_low_safe_relay_levels(self) -> None:
+    def test_hardware_defaults_use_arduino_serial(self) -> None:
         config = HardwareConfig()
 
-        self.assertEqual(config.compressor_enable.active_level, 0)
-        self.assertEqual(config.compressor_enable.safe_level, 1)
-        self.assertEqual(config.injection_valve.active_level, 0)
-        self.assertEqual(config.injection_valve.safe_level, 1)
+        self.assertEqual(config.arduino_serial.port, "/dev/ttyACM0")
+        self.assertEqual(config.arduino_serial.main_channel, "A0")
+        self.assertEqual(config.arduino_serial.second_channel, "A4")
+        self.assertEqual(config.relay_outputs.compressor.pin_bcm, 17)
+        self.assertEqual(config.relay_outputs.valve.pin_bcm, 27)
         self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
-        self.assertEqual(config.pressure_inputs.mode, "mock")
+        self.assertEqual(config.pressure_inputs.high_channel, 0)
 
     def test_hardware_config_persists_personal_mapping(self) -> None:
         data_dir = self.make_data_dir()
         try:
             config_path = data_dir / "hardware.json"
-            config = HardwareConfig(dry_run=False, notes="personal mapping")
+            config = HardwareConfig(
+                notes="personal mapping",
+                arduino_serial=ArduinoSerialConfig(port="/dev/ttyUSB0"),
+                relay_outputs=RelayOutputsConfig(
+                    valve=RelayOutputConfig(pin_bcm=18),
+                ),
+            )
             save_hardware_config(config_path, config)
 
             restored = load_hardware_config(config_path)
 
             self.assertEqual(restored.notes, "personal mapping")
-            self.assertEqual(restored.dry_run, False)
+            self.assertEqual(restored.arduino_serial.port, "/dev/ttyUSB0")
+            self.assertEqual(restored.relay_outputs.valve.pin_bcm, 18)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
-
-    def test_gpio_diagnostic_service_sets_and_reads_levels(self) -> None:
-        backend = MemoryGpioBackend()
-        diagnostics = GpioDiagnosticService(backend)
-
-        written = diagnostics.set_output_level(17, 1)
-        read = diagnostics.read_input_level(22, pull="up")
-
-        self.assertEqual(written, 1)
-        self.assertEqual(read, 1)
 
     def test_stand_config_validates_and_loads_defaults(self) -> None:
         data_dir = self.make_data_dir()
