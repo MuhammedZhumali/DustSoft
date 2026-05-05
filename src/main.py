@@ -6,14 +6,11 @@ import argparse
 from pathlib import Path
 
 from core.application import Application
-from devices.arduino import (
-    ArduinoAnalogPressureSensor,
-    ArduinoAnalogTransport,
-)
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from devices.mocks import (
     MockAnalogInput,
     MockEmergencyButton,
+    MockPressureSensor,
 )
 from devices.raspberry_pi import RaspberryPiRelayActuator
 from reference_meter.dusttrak import (
@@ -53,8 +50,6 @@ def _build_reference_meter(config: HardwareConfig):
 
 
 def _build_devices(config: HardwareConfig):
-    arduino = config.arduino_serial
-    analog_transport = ArduinoAnalogTransport(arduino)
     return {
         "compressor": RaspberryPiRelayActuator(
             config.relay_outputs.compressor,
@@ -62,18 +57,8 @@ def _build_devices(config: HardwareConfig):
         "valve": RaspberryPiRelayActuator(
             config.relay_outputs.valve,
         ),
-        "pressure_sensor": ArduinoAnalogPressureSensor(
-            analog_transport,
-            arduino.main_channel,
-            config.pressure_inputs,
-            kind="high",
-        ),
-        "pressure_low_sensor": ArduinoAnalogPressureSensor(
-            analog_transport,
-            arduino.second_channel,
-            config.pressure_inputs,
-            kind="low",
-        ),
+        "pressure_sensor": MockPressureSensor([config.pressure_inputs.high_default_bar]),
+        "pressure_low_sensor": MockPressureSensor([config.pressure_inputs.low_default_bar]),
         "reference_meter": _build_reference_meter(config),
         "emergency_button": MockEmergencyButton(),
     }
@@ -82,7 +67,7 @@ def _build_devices(config: HardwareConfig):
 def build_app(config_path: Path | None = None) -> Application:
     """Initialize application dependencies.
 
-    Uses Raspberry Pi GPIO relays for outputs and Arduino USB serial for analog inputs.
+    Uses Raspberry Pi GPIO relays for outputs and built-in fallback pressure values.
     """
     config_path = config_path or Path("data") / "hardware.json"
     if not config_path.exists():
@@ -103,7 +88,7 @@ def build_app(config_path: Path | None = None) -> Application:
 
 
 def run() -> None:
-    """Start the application with Raspberry Pi GPIO and Arduino analog telemetry."""
+    """Start the application with Raspberry Pi GPIO."""
     app = build_app()
     app.bootstrap()
     result = app.run_once()
@@ -111,7 +96,7 @@ def run() -> None:
 
 
 def run_gui() -> None:
-    """Start the operator GUI with Raspberry Pi GPIO and Arduino analog telemetry."""
+    """Start the operator GUI with Raspberry Pi GPIO."""
     app = build_app()
     app.bootstrap()
     launch_ui(app)

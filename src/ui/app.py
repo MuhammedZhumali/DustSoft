@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from core.application import Application
-from devices.config import ArduinoSerialConfig, HardwareConfig, RelayOutputConfig, RelayOutputsConfig
+from devices.config import HardwareConfig, PressureInputConfig, RelayOutputConfig, RelayOutputsConfig
 
 
 class DustSoftUI:
@@ -44,13 +44,9 @@ class DustSoftUI:
         }
 
         self.hardware_notes_var = tk.StringVar(value=hardware.notes)
-        arduino = hardware.arduino_serial
-        self.arduino_port_var = tk.StringVar(value=arduino.port)
-        self.arduino_baudrate_var = tk.StringVar(value=str(arduino.baudrate))
-        self.arduino_timeout_var = tk.StringVar(value=str(arduino.timeout_seconds))
-        self.arduino_startup_delay_var = tk.StringVar(value=str(arduino.startup_delay_seconds))
-        self.arduino_main_channel_var = tk.StringVar(value=arduino.main_channel)
-        self.arduino_second_channel_var = tk.StringVar(value=arduino.second_channel)
+        pressure_inputs = hardware.pressure_inputs
+        self.pressure_high_default_var = tk.StringVar(value=str(pressure_inputs.high_default_bar))
+        self.pressure_low_default_var = tk.StringVar(value=str(pressure_inputs.low_default_bar))
         relays = hardware.relay_outputs
         self.compressor_pin_var = tk.StringVar(value=str(relays.compressor.pin_bcm))
         self.compressor_active_var = tk.StringVar(value=str(relays.compressor.active_level))
@@ -318,9 +314,7 @@ class DustSoftUI:
     def _build_hardware_screen(self) -> None:
         self.hardware_frame.columnconfigure(0, weight=1)
 
-        mapping_frame = ttk.LabelFrame(
-            self.hardware_frame, text="Raspberry Pi relays and Arduino analog", padding=16
-        )
+        mapping_frame = ttk.LabelFrame(self.hardware_frame, text="Raspberry Pi hardware", padding=16)
         mapping_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
         mapping_frame.columnconfigure(1, weight=1)
 
@@ -330,12 +324,8 @@ class DustSoftUI:
         )
 
         rows = [
-            ("Serial port", self.arduino_port_var),
-            ("Baudrate", self.arduino_baudrate_var),
-            ("Timeout, s", self.arduino_timeout_var),
-            ("Startup delay, s", self.arduino_startup_delay_var),
-            ("Main analog channel", self.arduino_main_channel_var),
-            ("Second analog channel", self.arduino_second_channel_var),
+            ("High pressure fallback, bar", self.pressure_high_default_var),
+            ("Low pressure fallback, bar", self.pressure_low_default_var),
             ("Compressor relay BCM", self.compressor_pin_var),
             ("Compressor active level", self.compressor_active_var),
             ("Compressor safe level", self.compressor_safe_var),
@@ -465,14 +455,6 @@ class DustSoftUI:
     def _save_hardware_mapping(self) -> None:
         config = HardwareConfig(
             notes=self.hardware_notes_var.get().strip(),
-            arduino_serial=ArduinoSerialConfig(
-                port=self.arduino_port_var.get().strip(),
-                baudrate=int(self.arduino_baudrate_var.get()),
-                timeout_seconds=float(self.arduino_timeout_var.get()),
-                startup_delay_seconds=float(self.arduino_startup_delay_var.get()),
-                main_channel=self.arduino_main_channel_var.get().strip(),
-                second_channel=self.arduino_second_channel_var.get().strip(),
-            ),
             relay_outputs=RelayOutputsConfig(
                 compressor=RelayOutputConfig(
                     pin_bcm=int(self.compressor_pin_var.get()),
@@ -484,6 +466,10 @@ class DustSoftUI:
                     active_level=int(self.valve_active_var.get()),
                     safe_level=int(self.valve_safe_var.get()),
                 ),
+            ),
+            pressure_inputs=PressureInputConfig(
+                high_default_bar=float(self.pressure_high_default_var.get()),
+                low_default_bar=float(self.pressure_low_default_var.get()),
             ),
         )
         self.app.update_hardware_config(config)

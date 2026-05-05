@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from core.application import Application
 from core.controller import Controller
 from devices.config import (
-    ArduinoSerialConfig,
     HardwareConfig,
+    PressureInputConfig,
     RelayOutputConfig,
     RelayOutputsConfig,
     load_hardware_config,
@@ -324,7 +324,7 @@ class ApplicationInfrastructureTests(unittest.TestCase):
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
-    def test_hardware_config_loads_arduino_mapping(self) -> None:
+    def test_hardware_config_loads_raspberry_pi_mapping(self) -> None:
         data_dir = self.make_data_dir()
         try:
             config_path = data_dir / "hardware.json"
@@ -333,15 +333,13 @@ class ApplicationInfrastructureTests(unittest.TestCase):
                     {
                         "schema_version": 1,
                         "notes": "temporary",
-                        "arduino_serial": {
-                            "port": "/dev/ttyUSB0",
-                            "baudrate": 115200,
-                            "main_channel": "A0",
-                            "second_channel": "A4",
-                        },
                         "relay_outputs": {
                             "compressor": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
                             "valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
+                        },
+                        "pressure_inputs": {
+                            "high_default_bar": 1.1,
+                            "low_default_bar": 0.25,
                         },
                     }
                 ),
@@ -350,27 +348,22 @@ class ApplicationInfrastructureTests(unittest.TestCase):
 
             config = load_hardware_config(config_path)
 
-            self.assertEqual(config.arduino_serial.port, "/dev/ttyUSB0")
-            self.assertEqual(config.arduino_serial.baudrate, 115200)
-            self.assertEqual(config.arduino_serial.main_channel, "A0")
-            self.assertEqual(config.arduino_serial.second_channel, "A4")
             self.assertEqual(config.relay_outputs.compressor.pin_bcm, 17)
             self.assertEqual(config.relay_outputs.valve.pin_bcm, 27)
             self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
-            self.assertEqual(config.pressure_inputs.high_channel, 0)
+            self.assertEqual(config.pressure_inputs.high_default_bar, 1.1)
+            self.assertEqual(config.pressure_inputs.low_default_bar, 0.25)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
-    def test_hardware_defaults_use_arduino_serial(self) -> None:
+    def test_hardware_defaults_use_raspberry_pi_relays(self) -> None:
         config = HardwareConfig()
 
-        self.assertEqual(config.arduino_serial.port, "/dev/ttyACM0")
-        self.assertEqual(config.arduino_serial.main_channel, "A0")
-        self.assertEqual(config.arduino_serial.second_channel, "A4")
         self.assertEqual(config.relay_outputs.compressor.pin_bcm, 17)
         self.assertEqual(config.relay_outputs.valve.pin_bcm, 27)
         self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
-        self.assertEqual(config.pressure_inputs.high_channel, 0)
+        self.assertEqual(config.pressure_inputs.high_default_bar, 1.0)
+        self.assertEqual(config.pressure_inputs.low_default_bar, 0.2)
 
     def test_hardware_config_persists_personal_mapping(self) -> None:
         data_dir = self.make_data_dir()
@@ -378,18 +371,18 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             config_path = data_dir / "hardware.json"
             config = HardwareConfig(
                 notes="personal mapping",
-                arduino_serial=ArduinoSerialConfig(port="/dev/ttyUSB0"),
                 relay_outputs=RelayOutputsConfig(
                     valve=RelayOutputConfig(pin_bcm=18),
                 ),
+                pressure_inputs=PressureInputConfig(high_default_bar=1.2),
             )
             save_hardware_config(config_path, config)
 
             restored = load_hardware_config(config_path)
 
             self.assertEqual(restored.notes, "personal mapping")
-            self.assertEqual(restored.arduino_serial.port, "/dev/ttyUSB0")
             self.assertEqual(restored.relay_outputs.valve.pin_bcm, 18)
+            self.assertEqual(restored.pressure_inputs.high_default_bar, 1.2)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 

@@ -61,21 +61,17 @@ Raspberry Pi controls the relay board directly:
 - relay IN1 / compressor: BCM GPIO17;
 - relay IN2 / injection valve: BCM GPIO27 by default.
 
-Arduino is used only as an analog reader. It sends values for `A0` and `A4` over
-USB serial. Configure `arduino_serial.port` as `/dev/ttyACM0` or `/dev/ttyUSB0`.
 If your second relay is physically wired to BCM GPIO18 instead of BCM GPIO27,
 change `relay_outputs.valve.pin_bcm` in `data/hardware.json` from `27` to `18`.
 
-Standalone hardware smoke test:
+Pressure telemetry runs from configured fallback values in `pressure_inputs` so
+the Raspberry Pi can run the control UI by itself.
+
+Install Raspberry Pi GPIO dependencies:
 
 ```bash
-ls /dev/ttyACM* /dev/ttyUSB*
-python3 -m pip install pyserial gpiozero lgpio
-python3 scripts/raspberry_relay_from_arduino.py --port /dev/ttyACM0 --threshold-a0 512
+python3 -m pip install gpiozero lgpio
 ```
-
-Use `--relay2-gpio 18` if relay IN2 is wired to BCM GPIO18. Add `--active-low`
-if the relay module turns on when the GPIO output is LOW.
 
 The reference meter is built from `reference_meter` in `data/hardware.json`.
 Supported modes are `dusttrak_ethernet`, `dusttrak_http`, and `dusttrak_analog`.

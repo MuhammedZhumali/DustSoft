@@ -1,30 +1,21 @@
 {
   "schema_version": 1,
-  "notes": "Raspberry Pi GPIO controls relays; Arduino sends analog sensor values over USB.",
-  "arduino_serial": {
-    "port": "/dev/ttyACM0",
-    "baudrate": 9600,
-    "timeout_seconds": 1.0,
-    "startup_delay_seconds": 2.0,
-    "main_channel": "A0",
-    "second_channel": "A4"
-  },
+  "notes": "Raspberry Pi GPIO controls relays; pressure values use configured fallbacks.",
   "relay_outputs": {
     "compressor": {
       "pin_bcm": 17,
-      "active_level": 1,
-      "safe_level": 0
+      "active_level": 0,
+      "safe_level": 1
     },
     "valve": {
       "pin_bcm": 27,
-      "active_level": 1,
-      "safe_level": 0
+      "active_level": 0,
+      "safe_level": 1
     }
   },
   "pressure_inputs": {
-    "high_channel": 0,
-    "low_channel": 1,
-    "signal": "voltage_0_5",
+    "high_default_bar": 1.0,
+    "low_default_bar": 0.2,
     "high_min_bar": 0.0,
     "high_max_bar": 1.5,
     "low_min_bar": 0.0,

@@ -1,13 +1,18 @@
-"""Hardware configuration for Raspberry Pi relays and Arduino ADC telemetry."""
+"""Hardware configuration for Raspberry Pi relays."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
 HARDWARE_SCHEMA_VERSION = 1
+
+
+def _known_dataclass_values(cls: type, payload: dict[str, Any]) -> dict[str, Any]:
+    names = {field.name for field in fields(cls)}
+    return {key: value for key, value in payload.items() if key in names}
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,23 +31,12 @@ class ReferenceMeterConfig:
 
 @dataclass(frozen=True, slots=True)
 class PressureInputConfig:
-    high_channel: int = 0
-    low_channel: int = 1
-    signal: str = "voltage_0_5"
+    high_default_bar: float = 1.0
+    low_default_bar: float = 0.2
     high_min_bar: float = 0.0
     high_max_bar: float = 1.5
     low_min_bar: float = 0.0
     low_max_bar: float = 0.5
-
-
-@dataclass(frozen=True, slots=True)
-class ArduinoSerialConfig:
-    port: str = "/dev/ttyACM0"
-    baudrate: int = 9600
-    timeout_seconds: float = 1.0
-    startup_delay_seconds: float = 2.0
-    main_channel: str = "A0"
-    second_channel: str = "A4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,30 +55,31 @@ class RelayOutputsConfig:
 @dataclass(frozen=True, slots=True)
 class HardwareConfig:
     schema_version: int = HARDWARE_SCHEMA_VERSION
-    notes: str = "Raspberry Pi GPIO controls relays; Arduino sends analog sensor values over USB."
-    arduino_serial: ArduinoSerialConfig = ArduinoSerialConfig()
+    notes: str = "Raspberry Pi GPIO controls relays; pressure values use configured fallbacks."
     relay_outputs: RelayOutputsConfig = RelayOutputsConfig()
     pressure_inputs: PressureInputConfig = PressureInputConfig()
     reference_meter: ReferenceMeterConfig = ReferenceMeterConfig()
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "HardwareConfig":
-        arduino_serial = payload.get("arduino_serial", {})
         relay_outputs = payload.get("relay_outputs", {})
         pressure_inputs = payload.get("pressure_inputs", {})
         reference_meter = payload.get("reference_meter", {})
         config = cls(
             schema_version=int(payload.get("schema_version", HARDWARE_SCHEMA_VERSION)),
             notes=str(payload.get("notes", "")),
-            arduino_serial=ArduinoSerialConfig(**arduino_serial),
             relay_outputs=RelayOutputsConfig(
                 compressor=RelayOutputConfig(
                     **relay_outputs.get("compressor", {"pin_bcm": 17})
                 ),
                 valve=RelayOutputConfig(**relay_outputs.get("valve", {"pin_bcm": 27})),
             ),
-            pressure_inputs=PressureInputConfig(**pressure_inputs),
-            reference_meter=ReferenceMeterConfig(**reference_meter),
+            pressure_inputs=PressureInputConfig(
+                **_known_dataclass_values(PressureInputConfig, pressure_inputs)
+            ),
+            reference_meter=ReferenceMeterConfig(
+                **_known_dataclass_values(ReferenceMeterConfig, reference_meter)
+            ),
         )
         config.validate()
         return config
@@ -95,14 +90,6 @@ class HardwareConfig:
                 f"Unsupported hardware schema version {self.schema_version}; "
                 f"expected {HARDWARE_SCHEMA_VERSION}"
             )
-        if not self.arduino_serial.port.strip():
-            raise ValueError("Arduino serial port must not be empty")
-        if self.arduino_serial.baudrate <= 0:
-            raise ValueError("Arduino baudrate must be positive")
-        if self.arduino_serial.timeout_seconds <= 0:
-            raise ValueError("Arduino timeout must be positive")
-        if self.arduino_serial.startup_delay_seconds < 0:
-            raise ValueError("Arduino startup delay must be non-negative")
         for name, output in (
             ("compressor", self.relay_outputs.compressor),
             ("valve", self.relay_outputs.valve),
@@ -128,10 +115,18 @@ class HardwareConfig:
             raise ValueError("Reference meter analog signal must be 'voltage_0_5' or 'current_4_20'")
         if self.reference_meter.analog_max_value <= self.reference_meter.analog_min_value:
             raise ValueError("Reference meter analog range must be increasing")
-        if self.pressure_inputs.high_channel < 0 or self.pressure_inputs.low_channel < 0:
-            raise ValueError("Pressure input channels must be non-negative")
-        if self.pressure_inputs.signal not in {"voltage_0_5", "current_4_20"}:
-            raise ValueError("Pressure input signal must be 'voltage_0_5' or 'current_4_20'")
+        if not (
+            self.pressure_inputs.high_min_bar
+            <= self.pressure_inputs.high_default_bar
+            <= self.pressure_inputs.high_max_bar
+        ):
+            raise ValueError("High pressure fallback must be within the configured range")
+        if not (
+            self.pressure_inputs.low_min_bar
+            <= self.pressure_inputs.low_default_bar
+            <= self.pressure_inputs.low_max_bar
+        ):
+            raise ValueError("Low pressure fallback must be within the configured range")
 
     def to_mapping(self) -> dict[str, Any]:
         return asdict(self)
