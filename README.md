@@ -31,6 +31,19 @@ Start the operator GUI:
 On Windows you can also start the GUI by opening `DustSoft GUI.exe` from the
 parent `DustSoft` folder.
 
+On Raspberry Pi OS, use the Linux launcher instead of the Windows `.exe`:
+
+```bash
+chmod +x dustsoft-gui.sh scripts/install_raspberry_pi_launcher.sh
+./dustsoft-gui.sh
+```
+
+To add a desktop icon on Raspberry Pi OS:
+
+```bash
+./scripts/install_raspberry_pi_launcher.sh
+```
+
 On a desktop without Raspberry Pi GPIO support, DustSoft automatically opens with
 mock relay outputs. To force mock hardware explicitly:
 
