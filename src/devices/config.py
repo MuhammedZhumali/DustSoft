@@ -42,8 +42,8 @@ class PressureInputConfig:
 @dataclass(frozen=True, slots=True)
 class RelayOutputConfig:
     pin_bcm: int
-    active_level: int = 1
-    safe_level: int = 0
+    active_level: int = 0
+    safe_level: int = 1
 
 
 @dataclass(frozen=True, slots=True)

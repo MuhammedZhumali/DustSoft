@@ -406,8 +406,8 @@ class ApplicationInfrastructureTests(unittest.TestCase):
                         "schema_version": 1,
                         "notes": "temporary",
                         "relay_outputs": {
-                            "compressor": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
-                            "valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
+                            "compressor": {"pin_bcm": 17, "active_level": 0, "safe_level": 1},
+                            "valve": {"pin_bcm": 27, "active_level": 0, "safe_level": 1},
                         },
                         "pressure_inputs": {
                             "high_default_bar": 1.1,
@@ -433,6 +433,10 @@ class ApplicationInfrastructureTests(unittest.TestCase):
 
         self.assertEqual(config.relay_outputs.compressor.pin_bcm, 17)
         self.assertEqual(config.relay_outputs.valve.pin_bcm, 27)
+        self.assertEqual(config.relay_outputs.compressor.active_level, 0)
+        self.assertEqual(config.relay_outputs.compressor.safe_level, 1)
+        self.assertEqual(config.relay_outputs.valve.active_level, 0)
+        self.assertEqual(config.relay_outputs.valve.safe_level, 1)
         self.assertEqual(config.reference_meter.mode, "dusttrak_ethernet")
         self.assertEqual(config.pressure_inputs.high_default_bar, 1.0)
         self.assertEqual(config.pressure_inputs.low_default_bar, 0.2)
@@ -487,15 +491,15 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             first_config = {
                 "schema_version": 1,
                 "relay_outputs": {
-                    "compressor": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
-                    "valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
+                    "compressor": {"pin_bcm": 17, "active_level": 0, "safe_level": 1},
+                    "valve": {"pin_bcm": 27, "active_level": 0, "safe_level": 1},
                 },
             }
             duplicate_config = {
                 "schema_version": 1,
                 "relay_outputs": {
-                    "compressor": {"pin_bcm": 22, "active_level": 1, "safe_level": 0},
-                    "valve": {"pin_bcm": 23, "active_level": 1, "safe_level": 0},
+                    "compressor": {"pin_bcm": 22, "active_level": 0, "safe_level": 1},
+                    "valve": {"pin_bcm": 23, "active_level": 0, "safe_level": 1},
                 },
             }
             config_path.write_text(

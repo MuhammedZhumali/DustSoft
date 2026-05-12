@@ -161,7 +161,7 @@ def run_gpio_test(config_path: Path | None = None) -> None:
         "valve": config.relay_outputs.valve,
     }
     devices = {
-        name: OutputDevice(output.pin_bcm, active_high=True, initial_value=False)
+        name: OutputDevice(output.pin_bcm, active_high=True, initial_value=bool(output.safe_level))
         for name, output in outputs.items()
     }
 
@@ -171,27 +171,27 @@ def run_gpio_test(config_path: Path | None = None) -> None:
 
     try:
         print("GPIO diagnostic test. Watch the relay IN LEDs.")
-        print("Step 1: both LOW for 5 seconds")
-        set_level("compressor", 0)
-        set_level("valve", 0)
+        print("Step 1: both SAFE for 5 seconds")
+        set_level("compressor", outputs["compressor"].safe_level)
+        set_level("valve", outputs["valve"].safe_level)
         sleep(5)
 
-        print("Step 2: compressor HIGH, valve LOW for 5 seconds")
-        set_level("compressor", 1)
-        set_level("valve", 0)
+        print("Step 2: compressor ACTIVE, valve SAFE for 5 seconds")
+        set_level("compressor", outputs["compressor"].active_level)
+        set_level("valve", outputs["valve"].safe_level)
         sleep(5)
 
-        print("Step 3: compressor HIGH, valve HIGH for 5 seconds")
-        set_level("compressor", 1)
-        set_level("valve", 1)
+        print("Step 3: compressor ACTIVE, valve ACTIVE for 5 seconds")
+        set_level("compressor", outputs["compressor"].active_level)
+        set_level("valve", outputs["valve"].active_level)
         sleep(5)
 
-        print("Step 4: both LOW")
-        set_level("compressor", 0)
-        set_level("valve", 0)
+        print("Step 4: both SAFE")
+        set_level("compressor", outputs["compressor"].safe_level)
+        set_level("valve", outputs["valve"].safe_level)
     finally:
-        for device in devices.values():
-            device.off()
+        for name, device in devices.items():
+            device.value = outputs[name].safe_level
             device.close()
 
 

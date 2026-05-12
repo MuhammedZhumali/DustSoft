@@ -87,6 +87,7 @@ Raspberry Pi controls the relay board directly:
 
 - relay IN1 / compressor: BCM GPIO17;
 - relay IN2 / injection valve: BCM GPIO27 by default.
+- relay outputs are active-low by default: `active_level` is `0`, `safe_level` is `1`.
 
 If your second relay is physically wired to BCM GPIO18 instead of BCM GPIO27,
 change `relay_outputs.valve.pin_bcm` in `data/hardware.json` from `27` to `18`.
