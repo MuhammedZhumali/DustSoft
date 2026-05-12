@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import unittest
 from pathlib import Path
@@ -6,6 +7,7 @@ import sys
 from uuid import uuid4
 from zipfile import ZipFile
 import json
+from unittest.mock import patch
 from core.config_model import InjectionProfile, JsonStandConfigStorage, StandConfig
 from core.cycle import CycleStage, PulsePlanner
 from core.errors import DeviceProtocolError
@@ -33,6 +35,7 @@ from devices.mocks import (
     MockPressureSensor,
     MockReferenceMeter,
 )
+import main as dustsoft_main
 from remote import RemoteAccessPolicy, RemoteRequestContext, RemoteSecurityError
 from safety.interlock import InterlockError
 
@@ -137,6 +140,75 @@ class ApplicationInfrastructureTests(unittest.TestCase):
                 allowed_client_certificates=frozenset({"CN=trusted-client"}),
             ),
         )
+
+    def test_interval_injection_opens_valve_only_for_on_duration(self) -> None:
+        class RecordingActuator(MockActuator):
+            def __init__(self, name: str, events: list[tuple[str, str | float]]) -> None:
+                super().__init__()
+                self.name = name
+                self.events = events
+
+            def start(self) -> None:
+                self.events.append((self.name, "start"))
+                super().start()
+
+            def stop(self) -> None:
+                self.events.append((self.name, "stop"))
+                super().stop()
+
+        data_dir = self.make_data_dir()
+        events: list[tuple[str, str | float]] = []
+        try:
+            app = Application(
+                compressor=RecordingActuator("compressor", events),
+                valve=RecordingActuator("valve", events),
+                pressure_sensor=MockPressureSensor([1.0]),
+                reference_meter=MockReferenceMeter(),
+                data_dir=data_dir,
+            )
+            def record_sleep(seconds: float) -> None:
+                if seconds > 0.000001:
+                    events.append(("sleep", round(seconds, 3)))
+
+            app.injection_scheduler.sleep = record_sleep
+            app.bootstrap()
+            app.start()
+            app.configure_injection(duration_seconds=1.0, interval_seconds=5.0, count=2)
+
+            result = app.run_interval_injection()
+
+            self.assertEqual(result.completed_cycles, 2)
+            commands = [event for event in events if event[0] != "sleep"]
+            self.assertEqual(
+                commands,
+                [
+                    ("compressor", "start"),
+                    ("valve", "start"),
+                    ("valve", "stop"),
+                    ("valve", "start"),
+                    ("valve", "stop"),
+                    ("valve", "stop"),
+                    ("compressor", "stop"),
+                ],
+            )
+            valve_start_1 = events.index(("valve", "start"))
+            valve_stop_1 = events.index(("valve", "stop"))
+            valve_start_2 = events.index(("valve", "start"), valve_stop_1 + 1)
+            valve_stop_2 = events.index(("valve", "stop"), valve_start_2 + 1)
+            self.assertAlmostEqual(
+                sum(value for name, value in events[valve_start_1:valve_stop_1] if name == "sleep"),
+                1.0,
+            )
+            self.assertAlmostEqual(
+                sum(value for name, value in events[valve_stop_1:valve_start_2] if name == "sleep"),
+                5.0,
+            )
+            self.assertAlmostEqual(
+                sum(value for name, value in events[valve_start_2:valve_stop_2] if name == "sleep"),
+                1.0,
+            )
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
 
     def test_settings_persist_and_restore_after_restart(self) -> None:
         data_dir = self.make_data_dir()
@@ -365,6 +437,28 @@ class ApplicationInfrastructureTests(unittest.TestCase):
         self.assertEqual(config.pressure_inputs.high_default_bar, 1.0)
         self.assertEqual(config.pressure_inputs.low_default_bar, 0.2)
 
+    def test_launcher_can_use_mock_relays_for_local_gui(self) -> None:
+        with patch.dict(os.environ, {"DUSTSOFT_HARDWARE": "mock"}):
+            devices = dustsoft_main._build_devices(HardwareConfig())
+
+        self.assertIsInstance(devices["compressor"], MockActuator)
+        self.assertIsInstance(devices["valve"], MockActuator)
+
+    def test_launcher_auto_mode_falls_back_to_mock_relays_without_gpio(self) -> None:
+        with (
+            patch.dict(os.environ, {"DUSTSOFT_HARDWARE": "auto"}),
+            patch(
+                "main.RaspberryPiRelayActuator",
+                side_effect=dustsoft_main.RaspberryPiGpioError("gpio unavailable"),
+            ),
+            patch("main._is_raspberry_pi_host", return_value=False),
+            patch("builtins.print"),
+        ):
+            devices = dustsoft_main._build_devices(HardwareConfig())
+
+        self.assertIsInstance(devices["compressor"], MockActuator)
+        self.assertIsInstance(devices["valve"], MockActuator)
+
     def test_hardware_config_persists_personal_mapping(self) -> None:
         data_dir = self.make_data_dir()
         try:
@@ -383,6 +477,36 @@ class ApplicationInfrastructureTests(unittest.TestCase):
             self.assertEqual(restored.notes, "personal mapping")
             self.assertEqual(restored.relay_outputs.valve.pin_bcm, 18)
             self.assertEqual(restored.pressure_inputs.high_default_bar, 1.2)
+        finally:
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+    def test_hardware_config_uses_first_object_when_file_has_extra_data(self) -> None:
+        data_dir = self.make_data_dir()
+        try:
+            config_path = data_dir / "hardware.json"
+            first_config = {
+                "schema_version": 1,
+                "relay_outputs": {
+                    "compressor": {"pin_bcm": 17, "active_level": 1, "safe_level": 0},
+                    "valve": {"pin_bcm": 27, "active_level": 1, "safe_level": 0},
+                },
+            }
+            duplicate_config = {
+                "schema_version": 1,
+                "relay_outputs": {
+                    "compressor": {"pin_bcm": 22, "active_level": 1, "safe_level": 0},
+                    "valve": {"pin_bcm": 23, "active_level": 1, "safe_level": 0},
+                },
+            }
+            config_path.write_text(
+                json.dumps(first_config) + "\n" + json.dumps(duplicate_config),
+                encoding="utf-8",
+            )
+
+            config = load_hardware_config(config_path)
+
+            self.assertEqual(config.relay_outputs.compressor.pin_bcm, 17)
+            self.assertEqual(config.relay_outputs.valve.pin_bcm, 27)
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
@@ -516,3 +640,4 @@ class ApplicationInfrastructureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

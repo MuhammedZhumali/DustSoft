@@ -27,20 +27,18 @@ class RaspberryPiRelayActuator:
                 "gpiozero is not installed; install it with '.venv/bin/python -m pip install gpiozero lgpio'"
             ) from exc
 
-        active_high = self.config.active_level == 1
-        initial_value = self.config.safe_level == self.config.active_level
         self.device = OutputDevice(
             self.config.pin_bcm,
-            active_high=active_high,
-            initial_value=initial_value,
+            active_high=True,
+            initial_value=bool(self.config.safe_level),
         )
 
     def start(self) -> None:
-        self.device.on()
+        self.device.value = self.config.active_level
         self.is_running = True
 
     def stop(self) -> None:
-        self.device.off()
+        self.device.value = self.config.safe_level
         self.is_running = False
 
     def set_power(self, value: float) -> None:

@@ -3,22 +3,61 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from pathlib import Path
+from time import sleep
+
+if __package__ == "src":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.application import Application
 from devices.config import HardwareConfig, load_hardware_config, save_hardware_config
 from devices.mocks import (
+    MockActuator,
     MockAnalogInput,
     MockEmergencyButton,
     MockPressureSensor,
 )
-from devices.raspberry_pi import RaspberryPiRelayActuator
+from devices.raspberry_pi import RaspberryPiGpioError, RaspberryPiRelayActuator
 from reference_meter.dusttrak import (
     DustTrakAnalogClient,
     DustTrakEthernetClient,
     DustTrakHttpClient,
 )
 from ui import launch_ui
+
+
+def _hardware_mode() -> str:
+    mode = os.environ.get("DUSTSOFT_HARDWARE", "auto").strip().lower()
+    if mode not in {"auto", "mock", "raspberry-pi"}:
+        raise ValueError(
+            "DUSTSOFT_HARDWARE must be one of: auto, mock, raspberry-pi"
+        )
+    return mode
+
+
+def _is_raspberry_pi_host() -> bool:
+    try:
+        model = Path("/proc/device-tree/model").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        ).lower()
+    except OSError:
+        return False
+    return "raspberry pi" in model
+
+
+def _build_relay_actuator(name: str, config, mode: str):
+    if mode == "mock":
+        return MockActuator()
+    try:
+        return RaspberryPiRelayActuator(config)
+    except RaspberryPiGpioError:
+        if mode == "raspberry-pi" or _is_raspberry_pi_host():
+            raise
+        print(f"{name}: GPIO unavailable; using mock relay output")
+        return MockActuator()
 
 
 def _build_reference_meter(config: HardwareConfig):
@@ -50,12 +89,17 @@ def _build_reference_meter(config: HardwareConfig):
 
 
 def _build_devices(config: HardwareConfig):
+    mode = _hardware_mode()
     return {
-        "compressor": RaspberryPiRelayActuator(
+        "compressor": _build_relay_actuator(
+            "compressor",
             config.relay_outputs.compressor,
+            mode,
         ),
-        "valve": RaspberryPiRelayActuator(
+        "valve": _build_relay_actuator(
+            "valve",
             config.relay_outputs.valve,
+            mode,
         ),
         "pressure_sensor": MockPressureSensor([config.pressure_inputs.high_default_bar]),
         "pressure_low_sensor": MockPressureSensor([config.pressure_inputs.low_default_bar]),
@@ -102,6 +146,55 @@ def run_gui() -> None:
     launch_ui(app)
 
 
+def run_gpio_test(config_path: Path | None = None) -> None:
+    """Drive relay GPIO pins through known physical levels for diagnostics."""
+    try:
+        from gpiozero import OutputDevice  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError(
+            "gpiozero is not installed; install it with '.venv/bin/python -m pip install gpiozero lgpio'"
+        ) from exc
+
+    config = load_hardware_config(config_path or Path("data") / "hardware.json")
+    outputs = {
+        "compressor": config.relay_outputs.compressor,
+        "valve": config.relay_outputs.valve,
+    }
+    devices = {
+        name: OutputDevice(output.pin_bcm, active_high=True, initial_value=False)
+        for name, output in outputs.items()
+    }
+
+    def set_level(name: str, level: int) -> None:
+        devices[name].value = level
+        print(f"{name} BCM{outputs[name].pin_bcm} = {'HIGH' if level else 'LOW'}")
+
+    try:
+        print("GPIO diagnostic test. Watch the relay IN LEDs.")
+        print("Step 1: both LOW for 5 seconds")
+        set_level("compressor", 0)
+        set_level("valve", 0)
+        sleep(5)
+
+        print("Step 2: compressor HIGH, valve LOW for 5 seconds")
+        set_level("compressor", 1)
+        set_level("valve", 0)
+        sleep(5)
+
+        print("Step 3: compressor HIGH, valve HIGH for 5 seconds")
+        set_level("compressor", 1)
+        set_level("valve", 1)
+        sleep(5)
+
+        print("Step 4: both LOW")
+        set_level("compressor", 0)
+        set_level("valve", 0)
+    finally:
+        for device in devices.values():
+            device.off()
+            device.close()
+
+
 def main() -> None:
     """Console-script compatible launcher."""
     parser = argparse.ArgumentParser(description="DustSoft control app")
@@ -109,7 +202,7 @@ def main() -> None:
         "command",
         nargs="?",
         default="run",
-        choices=["run", "gui"],
+        choices=["run", "gui", "gpio-test"],
         help="Command to execute",
     )
     args = parser.parse_args()
@@ -118,6 +211,8 @@ def main() -> None:
         run()
     if args.command == "gui":
         run_gui()
+    if args.command == "gpio-test":
+        run_gpio_test()
 
 
 if __name__ == "__main__":

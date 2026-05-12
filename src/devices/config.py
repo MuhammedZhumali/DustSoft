@@ -136,8 +136,22 @@ def load_hardware_config(path: str | Path) -> HardwareConfig:
     config_path = Path(path)
     if not config_path.exists():
         return HardwareConfig()
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload = _load_hardware_payload(config_path)
     return HardwareConfig.from_mapping(payload)
+
+
+def _load_hardware_payload(config_path: Path) -> dict[str, Any]:
+    raw_config = config_path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        if exc.msg != "Extra data":
+            raise ValueError(f"Invalid hardware config JSON in {config_path}: {exc}") from exc
+        payload, _end = json.JSONDecoder().raw_decode(raw_config)
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Hardware config in {config_path} must be a JSON object")
+    return payload
 
 
 def save_hardware_config(path: str | Path, config: HardwareConfig) -> HardwareConfig:

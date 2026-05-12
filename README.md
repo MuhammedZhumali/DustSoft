@@ -28,6 +28,20 @@ Start the operator GUI:
 .\dustsoft gui
 ```
 
+On Windows you can also start the GUI by opening `DustSoft GUI.exe` from the
+parent `DustSoft` folder.
+
+On a desktop without Raspberry Pi GPIO support, DustSoft automatically opens with
+mock relay outputs. To force mock hardware explicitly:
+
+```powershell
+$env:DUSTSOFT_HARDWARE = "mock"
+.\dustsoft gui
+```
+
+On Raspberry Pi, install GPIO dependencies and keep `DUSTSOFT_HARDWARE` unset or
+set it to `raspberry-pi` for a hard failure if GPIO cannot be initialized.
+
 Or run through the virtual environment directly:
 
 ```powershell

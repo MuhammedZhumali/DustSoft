@@ -4,13 +4,13 @@
   "relay_outputs": {
     "compressor": {
       "pin_bcm": 17,
-      "active_level": 0,
-      "safe_level": 1
+      "active_level": 1,
+      "safe_level": 0
     },
     "valve": {
       "pin_bcm": 27,
-      "active_level": 0,
-      "safe_level": 1
+      "active_level": 1,
+      "safe_level": 0
     }
   },
   "pressure_inputs": {
